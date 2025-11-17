@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unity Log Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+    <!-- Utility Scripts -->
+    <script src="/static/js/database.js"></script>
+    <script src="/static/js/dashboard-state.js"></script>
+    <script src="/static/js/dom-utils.js"></script>
+    <script src="/static/js/api-client.js"></script>
+    <script src="/static/js/chart-helpers.js"></script>
+    <script src="/static/js/slack-integration.js"></script>
+    <script src="/static/js/log-lines-progress.js"></script>
+    <script src="/static/js/file-upload.js"></script>
+    <script src="/static/js/log-parser.js"></script>
+    <script src="/static/js/log-parser-page.js"></script>
+    <script src="/static/js/log-viewer.js"></script>
+    <script src="/static/js/tables.js"></script>
+    <script src="/static/js/timeline.js"></script>
+    <script src="/static/js/charts.js"></script>
+    <script src="/static/js/overview.js"></script>
+    <script src="/static/js/navigation.js"></script>
+    <script src="/static/js/folder-analysis.js"></script>
+    <script src="/static/js/pipeline.js"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <h1><svg width="128" height="80" viewBox="0 0 120 30" style="vertical-align: middle; margin-right: 15px; display: inline-block;" xmlns="http://www.w3.org/2000/svg"><rect fill="#e4e4e4" x="0" y="0" width="120" height="30"/><rect fill="#2d2d30" x="8.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="14.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="20.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="26.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="32.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="38.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="44.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="50.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="56.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="62.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="68.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="74.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="80.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="86.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="92.5" y="7.5" width="3" height="15"/><rect fill="#2d2d30" x="98.5" y="7.5" width="3" height="15"/></svg> Unity Log Analyzer<span id="project-name" style="color: #667eea; font-size: 0.6em; margin-left: 15px;"></span><span id="unity-version" style="color: #999; font-size: 0.5em; margin-left: 10px;"></span></h1>
+                <p class="subtitle">Interactive visualization of Unity Editor.log performance data</p>
+                <p style="font-size: 0.85em; color: #999; margin-top: 5px;">Version: {{ version }}</p>
+            </div>
+            <div class="header-nav">
+                <button onclick="openLogParser()" class="nav-button" style="background: #4CAF50; border: none; cursor: pointer; height: 90px; width: 135px; padding: 0 15px; display: inline-flex; align-items: center; justify-content: center; font-size: 1.275em; text-align: center;">📁 Parse Log File</button>
+                <a href="/log-viewer" class="nav-button" style="height: 90px; width: 135px; padding: 0 15px; display: inline-flex; align-items: center; justify-content: center; position: relative; font-size: 1.275em; text-align: center;">
+                    📄 View Full Log
+                    <span id="log-lines-progress-indicator" style="display: none; margin-left: 8px; font-size: 0.8em; color: #667eea; font-weight: normal;">
+                        <span id="log-lines-progress-text"></span>
+                    </span>
+                </a>
+            </div>
+        </header>
+        
+        <div id="loading" class="loading" style="display: none;">
+            <span class="loading-spinner"></span>
+            <span id="loading-text">Loading data</span>
+            <div id="loading-progress"></div>
+            <!-- Progress bar for batch log storage -->
+            <div id="batch-progress-container" style="display: none; margin-top: 15px; width: 100%; max-width: 600px;">
+                <div id="batch-progress-time" style="margin-bottom: 8px; font-size: 0.9em; color: #666;">
+                    Estimated time remaining: Calculating...
+                </div>
+                <div style="width: 100%; height: 24px; background-color: #e0e0e0; border-radius: 12px; overflow: hidden; position: relative;">
+                    <div id="batch-progress-bar" style="height: 100%; background-color: #4CAF50; width: 0%; transition: width 0.3s ease; border-radius: 12px;"></div>
+                    <div id="batch-progress-text" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.85em; font-weight: bold; color: #333; text-shadow: 0 0 2px white;">
+                        0%
+                    </div>
+                </div>
+                <button id="batch-cancel-btn" onclick="cancelBatchStorage()" style="margin-top: 10px; padding: 8px 16px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+                    Cancel
+                </button>
+            </div>
+        </div>
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <!-- Thin progress bar for log line loading -->
+        <div id="log-lines-progress-bar-container" style="display: none; margin-bottom: 15px; width: 100%;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                <span style="font-size: 0.85em; color: #666; white-space: nowrap;">Inserting log lines into database:</span>
+                <div style="flex: 1; height: 4px; background-color: #e0e0e0; border-radius: 2px; overflow: hidden; position: relative;">
+                    <div id="log-lines-progress-bar-fill" style="height: 100%; background-color: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
+                </div>
+                <span id="log-lines-progress-bar-text" style="font-size: 0.85em; color: #666; white-space: nowrap; min-width: 80px; text-align: right;">0%</span>
+            </div>
+        </div>
+        
+        <div id="stats" class="stats-grid" style="display: none;"></div>
+        <div id="charts" class="charts-grid" style="display: none;"></div>
+        <div id="tables"></div>
+        
+        <div id="slack-button-container" style="text-align: center; margin: 40px 0; padding: 20px;">
+            <button class="nav-button" onclick="copySlackHeadlines()" style="background: #667eea; border: none; cursor: pointer; height: 44px; padding: 0 16px;" id="slack-copy-btn">📋 Copy Headlines for Slack</button>
+        </div>
+    </div>
+
+    <script>
+        // Register datalabels plugin globally
+        Chart.register(ChartDataLabels);
+        
+        // State variables are now managed in dashboard-state.js
+        
+        // Helper function to format seconds into readable format
+        function formatTime(seconds) {
+            if (seconds >= 3600) {
+                // Hours:Minutes format (omit seconds for readability)
+                const hours = Math.floor(seconds / 3600);
+                const mins = Math.floor((seconds % 3600) / 60);
+                return `${hours}h ${mins}m`;
+            } else if (seconds >= 60) {
+                // Minutes:Seconds format
+                const minutes = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${minutes}m ${secs}s`;
+            }
+            return seconds.toFixed(2) + 's';
+        }
+        
+        // Initialize
+        loadLogList();
+        
+        // Start polling for log lines progress
+        startProgressPolling();
+        
+        function navigateToLogLine(lineNumber) {
+            if (lineNumber && lineNumber > 0) {
+                openLogViewer(lineNumber);
+            } else {
+                // Fallback if no line number available
+                console.warn('No line number available for this timeline segment');
+            }
+        }// Context menu for right-click copy
+        function showContextMenu(event, path) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            console.log('showContextMenu called with path:', path);
+            
+            // Remove existing menu
+            if (contextMenu) {
+                contextMenu.remove();
+                contextMenu = null;
+            }
+            
+            // Create menu
+            contextMenu = document.createElement('div');
+            contextMenu.className = 'context-menu';
+            
+            // Set position and visibility explicitly
+            // Use clientX/clientY instead of pageX/pageY to account for scroll
+            const x = event.clientX;
+            const y = event.clientY;
+            
+            contextMenu.style.position = 'fixed';
+            contextMenu.style.left = x + 'px';
+            contextMenu.style.top = y + 'px';
+            contextMenu.style.display = 'block';
+            contextMenu.style.visibility = 'visible';
+            contextMenu.style.opacity = '1';
+            contextMenu.style.zIndex = '1000000';
+            contextMenu.style.backgroundColor = 'white';
+            contextMenu.style.border = '1px solid #ddd';
+            contextMenu.style.borderRadius = '4px';
+            contextMenu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+            contextMenu.style.padding = '4px 0';
+            contextMenu.style.minWidth = '150px';
+            contextMenu.style.pointerEvents = 'auto';
+            contextMenu.style.margin = '0';
+            contextMenu.style.transform = 'none';
+            
+            // Create menu item with event listener instead of inline onclick
+            const menuItem = document.createElement('div');
+            menuItem.className = 'context-menu-item';
+            menuItem.textContent = 'Copy Path';
+            menuItem.style.padding = '8px 16px';
+            menuItem.style.cursor = 'pointer';
+            menuItem.style.fontSize = '13px';
+            menuItem.style.color = '#333';
+            menuItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyToClipboard(path);
+                hideContextMenu();
+            });
+            menuItem.addEventListener('mouseenter', () => {
+                menuItem.style.backgroundColor = '#f0f0f0';
+            });
+            menuItem.addEventListener('mouseleave', () => {
+                menuItem.style.backgroundColor = 'transparent';
+            });
+            
+            contextMenu.appendChild(menuItem);
+            
+            // Append to body, ensuring it's not clipped by any container
+            document.body.appendChild(contextMenu);
+            
+            // Force a reflow to ensure styles are applied
+            contextMenu.offsetHeight;
+            
+            // Use requestAnimationFrame to ensure DOM is ready
+            requestAnimationFrame(() => {
+                if (!contextMenu || !contextMenu.parentNode) {
+                    console.error('Context menu was removed before it could be displayed!');
+                    return;
+                }
+                
+                // Force visibility - use !important via setProperty
+                contextMenu.style.setProperty('display', 'block', 'important');
+                contextMenu.style.setProperty('visibility', 'visible', 'important');
+                contextMenu.style.setProperty('opacity', '1', 'important');
+                contextMenu.style.setProperty('z-index', '1000000', 'important');
+                
+                const rect = contextMenu.getBoundingClientRect();
+                const computedStyle = window.getComputedStyle(contextMenu);
+                console.log('Menu rect after append:', rect);
+                console.log('Menu computed display:', computedStyle.display);
+                console.log('Menu computed visibility:', computedStyle.visibility);
+                console.log('Menu computed opacity:', computedStyle.opacity);
+                console.log('Menu computed z-index:', computedStyle.zIndex);
+                console.log('Menu parent:', contextMenu.parentNode);
+                
+                // If menu is outside viewport, adjust position
+                if (rect.right > window.innerWidth) {
+                    contextMenu.style.left = (window.innerWidth - rect.width - 10) + 'px';
+                }
+                if (rect.bottom > window.innerHeight) {
+                    contextMenu.style.top = (event.clientY - rect.height - 10) + 'px';
+                }
+                if (rect.left < 0) {
+                    contextMenu.style.left = '10px';
+                }
+                if (rect.top < 0) {
+                    contextMenu.style.top = '10px';
+                }
+                
+                // Ensure menu is visible in viewport
+                const viewportTop = window.scrollY;
+                const viewportBottom = window.scrollY + window.innerHeight;
+                if (rect.top < viewportTop || rect.bottom > viewportBottom) {
+                    // Position relative to click point, but ensure it's visible
+                    const newTop = Math.min(event.clientY, window.innerHeight - rect.height - 10);
+                    contextMenu.style.top = Math.max(10, newTop) + 'px';
+                }
+                
+                // Final check - is it actually visible?
+                const finalRect = contextMenu.getBoundingClientRect();
+                if (finalRect.width === 0 || finalRect.height === 0) {
+                    console.error('Menu has zero dimensions!', finalRect);
+                }
+            });
+            
+            // Close on click outside - but wait a bit to ensure menu is visible
+            setTimeout(() => {
+                const clickHandler = (e) => {
+                    // Only hide if click is outside the menu
+                    if (contextMenu && !contextMenu.contains(e.target)) {
+                        hideContextMenu();
+                        document.removeEventListener('click', clickHandler);
+                    }
+                };
+                document.addEventListener('click', clickHandler);
+            }, 200);
+        }function renderAssetRows() {
+            const tbody = document.getElementById('asset-table-body');
+            const assetsToShow = allAssetsData.slice(0, displayedAssetCount);
+            
+            tbody.innerHTML = assetsToShow.map(asset => {
+                const category = asset.asset_category || 'Unknown';
+                const importer = asset.importer_type || 'Unknown';
+                const timeSeconds = asset.import_time_ms / 1000;
+                const timeFormatted = formatTime(timeSeconds);
+                
+                // Determine badge color based on time
+                let timeBadgeClass = 'badge';
+                if (timeSeconds > 1) {
+                    timeBadgeClass = 'badge-warning';
+                } else if (timeSeconds < 0.1) {
+                    timeBadgeClass = 'badge-success';
+                }
+                
+                const assetPath = asset.asset_path || '';
+                const escapedPath = assetPath.replace(/"/g, '&quot;');
+                
+                return `
+                <tr data-line="${asset.line_number}" 
+                    data-path="${escapedPath}"
+                    onclick="openLogViewer(${asset.line_number})">
+                    <td style="font-size: 0.85em;">
+                        <a href="javascript:void(0)" 
+                           style="color: #667eea; font-weight: 600; text-decoration: none;"
+                           onclick="event.stopPropagation(); openLogViewer(${asset.line_number});"
+                           title="Jump to line ${asset.line_number} in log">
+                            ${asset.line_number}
+                        </a>
+                    </td>
+                    <td>
+                        <strong style="color: #1a1a1a; font-size: 0.9em; word-break: break-word;">${asset.asset_name}</strong>
+                    </td>
+                    <td>
+                        <span class="badge">${category}</span>
+                    </td>
+                    <td>
+                        <span class="mono">${asset.asset_type || 'N/A'}</span>
+                    </td>
+                    <td>
+                        <span class="mono" style="font-size: 0.85em;">${importer}</span>
+                    </td>
+                    <td style="text-align: right;">
+                        <span class="${timeBadgeClass}" style="font-weight: 600;">${timeFormatted}</span>
+                    </td>
+                    <td>
+                        <span class="text-truncate-long" 
+                              style="font-size: 0.9em; color: #666;">
+                            ${asset.asset_path}
+                        </span>
+                    </td>
+                </tr>
+            `;
+            }).join('');
+            
+            // Update info
+            const infoDiv = document.getElementById('asset-info');
+            if (infoDiv) {
+                if (displayedAssetCount >= allAssetsData.length) {
+                    infoDiv.textContent = `Showing all ${allAssetsData.length} assets`;
+                } else {
+                    infoDiv.textContent = `Showing ${displayedAssetCount} of ${allAssetsData.length} assets (scroll to load more)`;
+                }
+            }
+        }
+        
+        function setupAssetTableScroll() {
+            const scrollContainer = document.getElementById('asset-table-scroll');
+            if (!scrollContainer) return;
+            
+            let isLoadingAssets = false;
+            
+            scrollContainer.addEventListener('scroll', () => {
+                const scrollTop = scrollContainer.scrollTop;
+                const scrollHeight = scrollContainer.scrollHeight;
+                const clientHeight = scrollContainer.clientHeight;
+                
+                // Load more when within 100px of bottom
+                if (scrollTop + clientHeight > scrollHeight - 100 && !isLoadingAssets && displayedAssetCount < allAssetsData.length) {
+                    isLoadingAssets = true;
+                    document.getElementById('asset-load-indicator').style.display = 'block';
+                    
+                    setTimeout(() => {
+                        displayedAssetCount = Math.min(displayedAssetCount + assetPageSize, allAssetsData.length);
+                        renderAssetRows();
+                        setupAssetTableContextMenus();
+                        isLoadingAssets = false;
+                        document.getElementById('asset-load-indicator').style.display = 'none';
+                    }, 100);
+                }
+            });
+        }function showLoading(message = 'Loading data') {
+            const loadingDiv = document.getElementById('loading');
+            const loadingText = document.getElementById('loading-text');
+            loadingText.textContent = message;
+            loadingDiv.style.display = 'block';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            hideLoading();
+        }
+        
+        function hideError() {
+            const errorDiv = document.getElementById('error');
+            errorDiv.style.display = 'none';
+        }
+        
+        // Slack integration and log viewer functions are now in their respective modules
+    </script>
+    
+    <!-- Log Viewer Overlay -->
+    <!-- Log Parser Overlay -->
+    <div id="log-parser-overlay" class="log-viewer-overlay" style="display: none;">
+        <div id="log-parser-panel" style="position: relative; background: white; border-radius: 8px; width: 900px; max-height: 90vh; overflow-y: auto; margin: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+            <div class="log-viewer-header">
+                <h2>📁 Parse Unity Log File</h2>
+                <button class="log-viewer-close" onclick="cancelLogParser()">×</button>
+            </div>
+            <div style="padding: 20px;">
+                <div class="file-upload-area" id="parser-upload-area" onclick="document.getElementById('parser-file-input').click()" style="border: 2px dashed #667eea; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; margin-bottom: 30px; cursor: pointer; transition: all 0.3s ease;">
+                    <div style="font-size: 3em; margin-bottom: 20px;">📄</div>
+                    <h2>Click to select a log file</h2>
+                    <p style="color: #999; margin-top: 10px;">or drag and drop your .log file here</p>
+                    <input type="file" id="parser-file-input" accept=".log" style="display: none;">
+                </div>
+                
+                <div id="parser-progress-container" style="display: none; margin-top: 30px;">
+                    <div id="parser-progress-text" style="margin-bottom: 15px; font-size: 1.1em; color: #666;">Preparing to parse...</div>
+                    <div id="parser-loading-progress" style="background: #f5f5f5; border-radius: 4px; padding: 15px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.9em; white-space: pre-wrap; margin-bottom: 15px;"></div>
+                    
+                    <div id="parser-progress-bars-container" style="margin-top: 20px;"></div>
+                    
+                    <button id="parser-batch-cancel-btn" onclick="cancelBatchStorage()" style="display: none; margin-top: 10px; padding: 8px 16px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+                        Cancel
+                    </button>
+                </div>
+                
+                <div id="parser-error-container" style="display: none; margin-top: 20px; padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px; color: #c62828;"></div>
+                
+                <div id="parser-completion-container" style="display: none; margin-top: 30px; text-align: center; padding: 30px; background: #e8f5e9; border-radius: 8px; border: 2px solid #4CAF50;">
+                    <h2 style="color: #2e7d32; margin-bottom: 15px;">✓ Parsing Complete!</h2>
+                    <p style="color: #666; margin-bottom: 20px;">Your log file has been successfully parsed and stored in IndexedDB.</p>
+                    <p id="parser-background-message" style="color: #667eea; margin-bottom: 20px; font-weight: 500; display: none;">
+                        Log lines are being stored in the background. You can use the dashboard while this completes.
+                    </p>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                        <button onclick="closeLogParser(); if (typeof loadLogList === 'function') loadLogList(); else if (window.loadLogList) window.loadLogList();" class="nav-button" style="background: #4CAF50; border: none; cursor: pointer; height: 44px; padding: 0 24px; display: inline-flex; align-items: center; text-decoration: none; color: white; font-weight: bold; border-radius: 4px;">
+                            Close & Refresh Dashboard
+                        </button>
+                        <button onclick="resetParser()" class="nav-button" style="background: #667eea; border: none; cursor: pointer; height: 44px; padding: 0 24px; display: inline-flex; align-items: center; text-decoration: none; color: white; font-weight: bold; border-radius: 4px;">
+                            Parse Another Log File
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="log-viewer-overlay" class="log-viewer-overlay" onclick="if(event.target === this) closeLogViewer();">
+        <div id="log-viewer-panel" class="log-viewer-panel">
+            <div class="log-viewer-header">
+                <h2>📄 Log Viewer</h2>
+                <button class="log-viewer-close" onclick="closeLogViewer();" title="Close">×</button>
+            </div>
+            <div class="log-viewer-controls">
+                <div class="log-viewer-search">
+                    <input type="text" id="log-viewer-search" placeholder="Search log... (press Enter)" onkeypress="if(event.key === 'Enter') searchLogViewer(event.target.value);">
+                </div>
+                <div class="log-viewer-filters">
+                    <button class="log-viewer-filter-btn active" data-filter="all" onclick="filterLogViewer('all')">All</button>
+                    <button class="log-viewer-filter-btn" data-filter="error" onclick="filterLogViewer('error')">Errors</button>
+                    <button class="log-viewer-filter-btn" data-filter="warning" onclick="filterLogViewer('warning')">Warnings</button>
+                    <button class="log-viewer-filter-btn" data-filter="import" onclick="filterLogViewer('import')">Imports</button>
+                    <button class="log-viewer-filter-btn" data-filter="pipeline" onclick="filterLogViewer('pipeline')">Pipeline</button>
+                </div>
+            </div>
+            <div id="log-viewer-loading" class="log-viewer-loading" style="display: none;">Loading log...</div>
+            <div id="log-viewer-content" class="log-viewer-content"></div>
+            <div id="log-viewer-stats" class="log-viewer-stats">
+                <span>Total lines: 0</span>
+                <span>Showing: 0 lines</span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

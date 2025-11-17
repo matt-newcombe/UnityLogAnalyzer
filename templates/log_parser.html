@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parse Log File - Unity Log Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+    <script src="/static/js/database.js"></script>
+    <script src="/static/js/dashboard-state.js"></script>
+    <script src="/static/js/api-client.js"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <style>
+        .parser-container {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+        .parser-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .file-upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            background: #f8f9fa;
+            margin-bottom: 30px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .file-upload-area:hover {
+            background: #f0f0f0;
+            border-color: #4CAF50;
+        }
+        .file-upload-area.dragover {
+            background: #e8f5e9;
+            border-color: #4CAF50;
+        }
+        #file-input {
+            display: none;
+        }
+        .progress-container {
+            margin-top: 30px;
+        }
+        #progress-text {
+            margin-bottom: 15px;
+            font-size: 1.1em;
+            color: #666;
+        }
+        #batch-progress-container {
+            margin-top: 20px;
+        }
+        .back-button {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-button">← Back to Dashboard</a>
+    
+    <div class="parser-container">
+        <div class="parser-header">
+            <h1>📁 Parse Unity Log File</h1>
+            <p style="color: #666;">Upload a Unity Editor.log file to analyze performance data</p>
+        </div>
+        
+        <div class="file-upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
+            <div style="font-size: 3em; margin-bottom: 20px;">📄</div>
+            <h2>Click to select a log file</h2>
+            <p style="color: #999; margin-top: 10px;">or drag and drop your .log file here</p>
+            <input type="file" id="file-input" accept=".log" onchange="handleFileSelect(event)">
+        </div>
+        
+        <div id="progress-container" class="progress-container" style="display: none;">
+            <div id="progress-text">Preparing to parse...</div>
+            <div id="loading-progress" style="background: #f5f5f5; border-radius: 4px; padding: 15px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.9em; white-space: pre-wrap; margin-bottom: 15px;"></div>
+            
+            <!-- Container for multiple progress bars (one per phase) -->
+            <div id="progress-bars-container" style="margin-top: 20px;"></div>
+            
+            <!-- Cancel button (shown when applicable) -->
+            <button id="batch-cancel-btn" onclick="cancelBatchStorage()" style="display: none; margin-top: 10px; padding: 8px 16px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+                Cancel
+            </button>
+        </div>
+        
+        <div id="error-container" style="display: none; margin-top: 20px; padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px; color: #c62828;"></div>
+        
+        <div id="completion-container" style="display: none; margin-top: 30px; text-align: center; padding: 30px; background: #e8f5e9; border-radius: 8px; border: 2px solid #4CAF50;">
+            <h2 style="color: #2e7d32; margin-bottom: 15px;">✓ Parsing Complete!</h2>
+            <p style="color: #666; margin-bottom: 20px;">Your log file has been successfully parsed and stored in IndexedDB.</p>
+            <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                <a href="/" class="nav-button" style="background: #4CAF50; border: none; cursor: pointer; height: 44px; padding: 0 24px; display: inline-flex; align-items: center; text-decoration: none; color: white; font-weight: bold; border-radius: 4px;">
+                    Go to Dashboard →
+                </a>
+                <button onclick="resetParser()" class="nav-button" style="background: #667eea; border: none; cursor: pointer; height: 44px; padding: 0 24px; display: inline-flex; align-items: center; text-decoration: none; color: white; font-weight: bold; border-radius: 4px;">
+                    Parse Another Log File
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/log-parser-page.js"></script>
+</body>
+</html>
+

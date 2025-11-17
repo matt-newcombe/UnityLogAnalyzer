@@ -1,0 +1,4 @@
+# Test dependencies for Unity Log Analyzer
+pytest==7.4.3
+playwright==1.40.0
+
