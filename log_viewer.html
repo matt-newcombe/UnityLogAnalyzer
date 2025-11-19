@@ -211,7 +211,7 @@
         <header>
             <div>
                 <h2 style="color: #333;">📄 Full Log Viewer</h2>
-                <p style="font-size: 0.85em; color: #999; margin-top: 5px;">Version: Client-Side</p>
+                <p id="version-display" style="font-size: 0.85em; color: #999; margin-top: 5px;">Version: Loading...</p>
             </div>
             <a href="index.html" class="back-link">← Back to Dashboard</a>
         </header>
@@ -249,6 +249,8 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+    <script src="static/js/database-timeline.js"></script>
+    <script src="static/js/database-log-lines.js"></script>
     <script src="static/js/database.js"></script>
     <script src="static/js/api-client.js"></script>
     <script>
@@ -640,6 +642,25 @@
             div.textContent = text;
             return div.innerHTML;
         }
+    </script>
+    <script>
+        // Load and display version number
+        fetch('version.txt')
+            .then(response => response.text())
+            .then(text => {
+                const version = text.trim();
+                const versionElement = document.getElementById('version-display');
+                if (versionElement) {
+                    versionElement.textContent = `Version: ${version}`;
+                }
+            })
+            .catch(error => {
+                console.warn('Failed to load version:', error);
+                const versionElement = document.getElementById('version-display');
+                if (versionElement) {
+                    versionElement.textContent = 'Version: Unknown';
+                }
+            });
     </script>
 </body>
 </html>

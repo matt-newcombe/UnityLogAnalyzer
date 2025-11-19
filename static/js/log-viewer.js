@@ -4,16 +4,16 @@
  */
 
 /**
- * Open the log viewer overlay at a specific line number
- * @param {number} lineNumber - Line number to highlight and scroll to
+ * Open the log viewer overlay at a specific line number or with a filter
+ * @param {number|string} lineNumberOrFilter - Line number to highlight and scroll to, or filter type ('error', 'warning', 'import', 'pipeline')
+ * @param {string} filter - Optional filter type if lineNumberOrFilter is a number
  */
-function openLogViewer(lineNumber) {
+function openLogViewer(lineNumberOrFilter, filter) {
     const overlay = document.getElementById('log-viewer-overlay');
     const panel = document.getElementById('log-viewer-panel');
     
     if (!overlay || !panel) {
-        // Fallback to full page navigation
-        window.location.href = `/log-viewer?line=${lineNumber}`;
+        console.error('Log viewer overlay not found');
         return;
     }
     
@@ -23,16 +23,28 @@ function openLogViewer(lineNumber) {
     // Prevent body scroll when overlay is open
     document.body.style.overflow = 'hidden';
     
-    // Load log content
-    loadLogViewerContent(lineNumber);
+    // Determine if we have a filter or line number
+    let lineNumber = null;
+    let filterType = null;
+    
+    if (typeof lineNumberOrFilter === 'number') {
+        lineNumber = lineNumberOrFilter;
+        filterType = filter || null;
+    } else if (typeof lineNumberOrFilter === 'string') {
+        // It's a filter type
+        filterType = lineNumberOrFilter;
+    }
+    
+    // Load log content with filter or line number
+    loadLogViewerContent(lineNumber, filterType);
 }
 
 /**
- * Open log viewer with a filter in full-page mode
- * @param {string} filter - Filter to apply
+ * Open log viewer with a filter using the inline overlay
+ * @param {string} filter - Filter to apply ('error', 'warning', 'import', 'pipeline')
  */
 function openLogViewerWithFilter(filter) {
-    window.location.href = `/log-viewer?filter=${encodeURIComponent(filter)}`;
+    openLogViewer(filter);
 }
 
 /**
@@ -51,9 +63,10 @@ function closeLogViewer() {
 
 /**
  * Load log content from the API
- * @param {number} lineNumber - Line number to load content around
+ * @param {number} lineNumber - Line number to load content around (optional if filter is provided)
+ * @param {string} filterType - Filter type ('error', 'warning', 'import', 'pipeline') (optional)
  */
-async function loadLogViewerContent(lineNumber) {
+async function loadLogViewerContent(lineNumber, filterType) {
     const content = document.getElementById('log-viewer-content');
     const loading = document.getElementById('log-viewer-loading');
     const stats = document.getElementById('log-viewer-stats');
@@ -150,7 +163,7 @@ async function loadLogViewerContent(lineNumber) {
                     clearInterval(progressInterval);
                     if (updatedProgress && updatedProgress.status === 'complete') {
                         // Retry loading
-                        loadLogViewerContent(lineNumber);
+                        loadLogViewerContent(lineNumber, filterType);
                     } else if (updatedProgress && updatedProgress.status === 'error') {
                         content.innerHTML = `<div style="color: #f48771; text-align: center; padding: 50px;">Error loading log lines: ${updatedProgress.error || 'Unknown error'}</div>`;
                     }
@@ -166,17 +179,34 @@ async function loadLogViewerContent(lineNumber) {
     if (content) content.innerHTML = '';
     
     try {
-        const data = await window.apiClient.getLogViewer({ center_line: lineNumber });
+        // Build query options
+        const queryOptions = {};
+        if (lineNumber) {
+            queryOptions.center_line = lineNumber;
+        }
+        if (filterType) {
+            queryOptions.filter_type = filterType;
+            // For filters, start from the beginning
+            queryOptions.offset = 0;
+            queryOptions.limit = 100;
+        }
+        
+        const data = await window.apiClient.getLogViewer(queryOptions);
         
         if (data.lines && data.lines.length > 0) {
             renderLogLines(data.lines, lineNumber);
             
             // Update stats
             if (stats) {
-                stats.innerHTML = `
-                    <span>Total lines: ${data.total_lines || 0}</span>
-                    <span>Showing: ${data.lines.length} lines (around line ${lineNumber})</span>
-                `;
+                let statsText = `Total lines: ${data.total_lines || 0}`;
+                if (filterType) {
+                    statsText += ` | Filter: ${filterType} | Showing: ${data.lines.length} lines`;
+                } else if (lineNumber) {
+                    statsText += ` | Showing: ${data.lines.length} lines (around line ${lineNumber})`;
+                } else {
+                    statsText += ` | Showing: ${data.lines.length} lines`;
+                }
+                stats.innerHTML = `<span>${statsText}</span>`;
             }
         } else {
             // No lines found - check if worker just completed and retry with exponential backoff
@@ -195,7 +225,7 @@ async function loadLogViewerContent(lineNumber) {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     
                     try {
-                        retryData = await window.apiClient.getLogViewer({ center_line: lineNumber });
+                        retryData = await window.apiClient.getLogViewer(queryOptions);
                         if (retryData.lines && retryData.lines.length > 0) {
                             console.log(`[Log Viewer] Successfully loaded ${retryData.lines.length} lines on retry ${retryCount + 1}`);
                             break;
@@ -238,7 +268,7 @@ async function loadLogViewerContent(lineNumber) {
             const progress = window.getLogLinesProgress ? window.getLogLinesProgress() : null;
             if (progress && progress.status === 'in_progress') {
                 // Recursively call to show progress
-                loadLogViewerContent(lineNumber);
+                loadLogViewerContent(lineNumber, filterType);
                 return;
             }
         }

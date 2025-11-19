@@ -479,8 +479,6 @@
         }
 
         function loadCategoryChart(categoryData) {
-            console.log('loadCategoryChart called with:', categoryData);
-            
             if (!categoryData || categoryData.length === 0) {
                 console.warn('No category data available');
                 const ctx = document.getElementById('categoryChart');
@@ -492,7 +490,6 @@
             
             // Top 15 categories by time
             const topCategories = categoryData.slice(0, 15);
-            console.log('Top categories:', topCategories);
             
             const ctx = document.getElementById('categoryChart');
             if (!ctx) {
@@ -511,9 +508,6 @@
                 return parseFloat((timeMs / 1000).toFixed(2));
             });
             
-            console.log('Chart data:', chartData);
-            console.log('Labels:', topCategories.map(c => c.asset_category || 'Unknown'));
-            
             ctx.chart = new Chart(ctx, {
                 type: 'pie',
                 data: {
@@ -521,9 +515,9 @@
                     datasets: [{
                         data: chartData,
                         backgroundColor: [
-                            '#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe',
-                            '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#330867',
-                            '#a8edea', '#fed6e3', '#ffecd2', '#fcb69f', '#ff9a9e'
+                            '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+                            '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B739', '#52BE80',
+                            '#EC7063', '#5DADE2', '#F1948A', '#82E0AA', '#F4D03F'
                         ],
                         borderWidth: 0
                     }]
@@ -585,20 +579,35 @@
 
         async function loadPipelineBreakdown() {
             try {
-                const breakdown = await window.apiClient.getPipelineBreakdown();
+                // Get operations breakdown instead of pipeline breakdown
+                const operations = await window.apiClient.getOperationsBreakdown();
                 
                 const labels = [];
                 const values = [];
                 
-                // Only show Script Compilation and Domain Reloads
-                if (breakdown.total_compile) {
-                    labels.push('Script Compilation');
-                    values.push((breakdown.total_compile / 1000).toFixed(2));
+                // Show all operation types
+                operations.forEach(op => {
+                    if (op.total_time_ms > 0) {
+                        labels.push(op.type);
+                        values.push((op.total_time_ms / 1000).toFixed(2));
+                    }
+                });
+                
+                // If no operations, show message
+                if (labels.length === 0) {
+                    const container = document.getElementById('pipelineBreakdownChart').parentElement;
+                    const spinner = container.querySelector('.element-spinner');
+                    if (spinner) spinner.innerHTML = '<span style="color: #666;">No operations found</span>';
+                    return;
                 }
-                if (breakdown.total_domain_reload) {
-                    labels.push('Domain Reloads');
-                    values.push((breakdown.total_domain_reload / 1000).toFixed(2));
-                }
+                
+                // Generate colors for operations (use distinct colors)
+                const colors = [
+                    '#9966FF', '#FF9F40', '#4CAF50', '#2196F3', 
+                    '#F44336', '#9C27B0', '#00BCD4', '#FFC107',
+                    '#795548', '#607D8B'
+                ];
+                const backgroundColor = labels.map((_, i) => colors[i % colors.length]);
                 
                 const pipelineChart = new Chart(document.getElementById('pipelineBreakdownChart'), {
                     type: 'pie',
@@ -606,9 +615,7 @@
                         labels: labels,
                         datasets: [{
                             data: values,
-                            backgroundColor: [
-                                '#9966FF', '#FF9F40'
-                            ],
+                            backgroundColor: backgroundColor,
                             borderWidth: 0
                         }]
                     },
@@ -643,7 +650,8 @@
                             if (elements.length > 0) {
                                 const index = elements[0].index;
                                 const label = labels[index];
-                                loadPipelineDetails(label);
+                                // Load operations by type instead of pipeline details
+                                loadOperationsByType(label);
                             }
                         }
                     }

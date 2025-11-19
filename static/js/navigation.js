@@ -10,12 +10,8 @@
             setCurrentView('category');
             currentFilter = category;
             
-            showLoading();
-            
             try {
                 const assets = await window.apiClient.getAssetsByCategory(category);
-                
-                hideLoading();
                 
                 displayAssetsTable(assets, `${category} Assets`);
             } catch (error) {
@@ -28,12 +24,8 @@
             setCurrentView('type');
             currentFilter = type;
             
-            showLoading();
-            
             try {
                 const assets = await window.apiClient.getAssetsByType(type);
-                
-                hideLoading();
                 
                 displayAssetsTable(assets, `${type} Assets`);
             } catch (error) {
@@ -64,12 +56,8 @@
             setCurrentView('folder_analysis');
             currentFilter = 'Folder Analysis';
             
-            showLoading();
-            
             try {
                 const folders = await window.apiClient.getFolderAnalysis();
-                
-                hideLoading();
                 
                 displayFolderAnalysisTable(folders);
                 
@@ -87,8 +75,6 @@
             setCurrentView('folder_assets');
             currentFilter = `Assets in ${folderPath}`;
             
-            showLoading();
-            
             try {
                 // Get all assets and filter by folder path
                 const allAssets = await window.apiClient.getAssets();
@@ -97,8 +83,6 @@
                 const folderAssets = allAssets.filter(asset => 
                     asset.asset_path.startsWith(folderPath + '/')
                 ).sort((a, b) => b.import_time_ms - a.import_time_ms);
-                
-                hideLoading();
                 
                 displayAssetsTable(folderAssets, `Assets in ${folderPath}`, `Showing ${folderAssets.length} assets in folder`);
             } catch (error) {
@@ -125,12 +109,8 @@
             setCurrentView('pipeline');
             currentFilter = category;
             
-            showLoading();
-            
             try {
                 const refreshes = await window.apiClient.getPipelineRefreshes();
-                
-                hideLoading();
                 
                 displayPipelineTable(refreshes, category);
                 
@@ -140,6 +120,19 @@
                 }, 100);
             } catch (error) {
                 showError('Failed to load pipeline details: ' + error.message);
+            }
+        }
+
+        async function loadOperationsByType(operationType) {
+            setCurrentView('operations');
+            currentFilter = operationType;
+            
+            try {
+                const operations = await window.apiClient.getOperationsByType(operationType);
+                
+                displayOperationsTable(operations, `${operationType} Operations`);
+            } catch (error) {
+                showError('Failed to load operations: ' + error.message);
             }
         }
 

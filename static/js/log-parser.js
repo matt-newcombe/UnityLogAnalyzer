@@ -200,7 +200,7 @@ class UnityLogParser {
      * Parse asset import line
      * Returns object with import data or null if not an import line
      */
-    _parseAssetImport(line, lineNumber) {
+    _parseAssetImport(line, lineNumber, timestamp = null) {
         // Primary pattern: Start importing PATH using Guid(GUID) IMPORTER -> (artifact id: 'HASH') in X.XXX seconds
         let pattern = /Start importing (.+?) using Guid\(([a-f0-9]+)\) (.+?)(?: -> \(artifact id: '([a-f0-9]+)'\))? in ([\d.]+) seconds/;
         let match = line.match(pattern);
@@ -213,51 +213,24 @@ class UnityLogParser {
             const timeSeconds = parseFloat(match[5] || match[4]);
             const timeMs = timeSeconds * 1000;
 
-            // Extract importer type
-            let importerType = importerRaw.trim();
-            if (importerType.startsWith('(') && importerType.endsWith(')')) {
-                importerType = importerType.slice(1, -1);
-            } else if (importerType.startsWith('Importer(')) {
-                if (importerType.includes('-1')) {
-                    importerType = null;
-                } else {
-                    importerType = 'Importer';
-                }
-            }
-
-            // Handle invalid importer types
-            if (importerType === '-1' || !importerType || importerType.trim() === '-1') {
-                importerType = null;
-            }
-
-            // Skip package folders
-            const pathParts = assetPath.split('/');
-            const lastPart = pathParts[pathParts.length - 1] || '';
-            if (lastPart.startsWith('com.') && assetPath.split('/').length <= 2) {
+            const importerType = this._extractImporterType(importerRaw);
+            
+            if (this._shouldSkipAsset(assetPath, importerType)) {
                 return null;
             }
 
-            // Skip DefaultImporter folders without extensions
-            if (importerType === 'DefaultImporter' && !lastPart.includes('.')) {
-                return null;
-            }
-
-            const assetName = this._getFilename(assetPath);
-            const { assetType, category } = this._categorizeAsset(assetPath, importerType);
-
-            return {
-                log_id: null, // Will be set later
-                line_number: lineNumber,
-                asset_path: assetPath,
-                asset_name: assetName,
-                asset_type: assetType,
-                asset_category: category,
-                guid: guid,
-                artifact_id: artifactId,
-                importer_type: importerType,
-                import_time_seconds: timeSeconds,
-                import_time_ms: timeMs
-            };
+            return this._createAssetImport({
+                logId: null, // Will be set later
+                lineNumber,
+                assetPath,
+                guid,
+                artifactId,
+                importerType,
+                timeSeconds,
+                timeMs,
+                startTimestamp: timestamp,
+                endTimestamp: timestamp // Single-line import: same timestamp for start and end
+            });
         }
 
         // Fallback pattern 1: Worker thread format without importer type
@@ -267,37 +240,27 @@ class UnityLogParser {
             const assetPath = match[1];
             const guid = match[2];
             const ext = this._getExtension(assetPath);
-            const importerType = this.importerMap[ext] || 'UnknownImporter';
+            const importerType = this.importerMap[ext] || null;
             const artifactId = null;
             const timeSeconds = 0.001;
             const timeMs = 1.0;
 
-            // Skip package folders
-            const pathParts = assetPath.split('/');
-            const lastPart = pathParts[pathParts.length - 1] || '';
-            if (lastPart.startsWith('com.') && assetPath.split('/').length <= 2) {
-                return null;
-            }
-            if (!lastPart.includes('.')) {
+            if (this._shouldSkipAsset(assetPath, importerType)) {
                 return null;
             }
 
-            const assetName = this._getFilename(assetPath);
-            const { assetType, category } = this._categorizeAsset(assetPath, importerType);
-
-            return {
-                log_id: null,
-                line_number: lineNumber,
-                asset_path: assetPath,
-                asset_name: assetName,
-                asset_type: assetType,
-                asset_category: category,
-                guid: guid,
-                artifact_id: artifactId,
-                importer_type: importerType,
-                import_time_seconds: timeSeconds,
-                import_time_ms: timeMs
-            };
+            return this._createAssetImport({
+                logId: null,
+                lineNumber,
+                assetPath,
+                guid,
+                artifactId,
+                importerType,
+                timeSeconds,
+                timeMs,
+                startTimestamp: timestamp,
+                endTimestamp: timestamp
+            });
         }
 
         // Fallback pattern 2: incomplete lines with importer
@@ -312,8 +275,7 @@ class UnityLogParser {
                 importerType = null;
             }
 
-            // Skip folders
-            if (importerType === 'DefaultImporter' && !this._getFilename(assetPath).includes('.')) {
+            if (this._shouldSkipAsset(assetPath, importerType)) {
                 return null;
             }
 
@@ -323,22 +285,18 @@ class UnityLogParser {
                 return null; // Will be handled as pending import
             }
 
-            const assetName = this._getFilename(assetPath);
-            const { assetType, category } = this._categorizeAsset(assetPath, importerType);
-
-            return {
-                log_id: null,
-                line_number: lineNumber,
-                asset_path: assetPath,
-                asset_name: assetName,
-                asset_type: assetType,
-                asset_category: category,
-                guid: guid,
-                artifact_id: null,
-                importer_type: importerType,
-                import_time_seconds: 0.001,
-                import_time_ms: 1.0
-            };
+            return this._createAssetImport({
+                logId: null,
+                lineNumber,
+                assetPath,
+                guid,
+                artifactId: null,
+                importerType,
+                timeSeconds: 0.001,
+                timeMs: 1.0,
+                startTimestamp: timestamp,
+                endTimestamp: timestamp
+            });
         }
 
         return null;
@@ -461,16 +419,6 @@ class UnityLogParser {
         return steps;
     }
 
-    /**
-     * Parse script compilation line (DEPRECATED - now using Tundra operations)
-     * Script compilation is now calculated from Tundra operations, which represent Unity's compilation process
-     * This method is kept for reference but is no longer used
-     */
-    _parseScriptCompilation(line, lineNumber, logId) {
-        // Script compilation is now calculated from Tundra operations
-        // This method is deprecated
-        return null;
-    }
 
     /**
      * Parse telemetry data
@@ -502,8 +450,15 @@ class UnityLogParser {
      * Parse operation timing line
      */
     _parseOperation(line, lineNumber, logId) {
+        // Strip timestamp prefix if present (format: YYYY-MM-DDTHH:MM:SS.sssZ|thread_id|)
+        let lineToParse = line;
+        const timestampPrefix = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\|[^|]+\|/;
+        if (timestampPrefix.test(line)) {
+            lineToParse = line.replace(timestampPrefix, '');
+        }
+        
         const pattern = /([^:]+)\s*:\s*"\s*##\s*(.+?)\s*##\s*"\s+took\s+([\d.]+)\s+sec(?:.*current mem:\s*(\d+)\s*MB)?/;
-        const match = line.match(pattern);
+        const match = lineToParse.match(pattern);
 
         if (match) {
             return {
@@ -582,10 +537,184 @@ class UnityLogParser {
 
     /**
      * Extract timestamp from line
+     * Supports formats:
+     * - 2025-11-15T15:13:34 (basic format, seconds precision)
+     * - 2025-11-15T15:13:34.080391Z (with microseconds and Z, highest precision)
+     * - 2025-11-15T15:13:34.080Z (with milliseconds and Z, 3dp precision)
+     * 
+     * Preserves full precision when available (especially Z format with milliseconds)
+     * for accurate wall-to-wall time calculations
      */
     _extractTimestamp(line) {
-        const match = line.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
+        // Try full format with milliseconds/microseconds and Z first (highest precision)
+        // Pattern: YYYY-MM-DDTHH:MM:SS.sssZ or YYYY-MM-DDTHH:MM:SS.ssssssZ
+        let match = line.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,6}Z)/);
+        if (match) {
+            // Preserve full format with milliseconds/microseconds and Z
+            // This provides the highest precision (3-6 decimal places)
+            return match[1];
+        }
+        
+        // Try format with milliseconds/microseconds but no Z
+        match = line.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,6})/);
+        if (match) {
+            // Preserve milliseconds/microseconds precision
+            return match[1];
+        }
+        
+        // Fallback to basic format (seconds precision only)
+        match = line.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
         return match ? match[1] : null;
+    }
+
+    /**
+     * Extract importer type from raw importer string
+     * Handles formats like "Importer(-1,...)" or "Importer(TextureImporter)"
+     */
+    _extractImporterType(importerRaw) {
+        if (!importerRaw || typeof importerRaw !== 'string') {
+            return null;
+        }
+
+        const trimmed = importerRaw.trim();
+        
+        // Match "Importer(...)" specifically
+        const importerMatch = trimmed.match(/Importer\(([^)]+)\)/);
+        if (importerMatch) {
+            const importerValue = importerMatch[1];
+            // If it's -1 or starts with -1, it's null/unknown importer
+            if (importerValue.startsWith('-1') || importerValue === '-1') {
+                return null;
+            }
+            // Extract the actual importer type (may be comma-separated)
+            const parts = importerValue.split(',');
+            const importerType = parts[0].trim();
+            // If it's just a GUID or numeric, it's not a valid importer type
+            if (/^[a-f0-9]+$/i.test(importerType) || /^-?\d+$/.test(importerType)) {
+                return null;
+            }
+            return importerType;
+        }
+        
+        // Fallback: if it's just in parentheses without "Importer" prefix
+        if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+            const importerType = trimmed.slice(1, -1);
+            // Validate it's not a GUID or -1
+            if (/^[a-f0-9]+$/i.test(importerType) || importerType === '-1' || /^-?\d+$/.test(importerType)) {
+                return null;
+            }
+            return importerType;
+        }
+        
+        return null;
+    }
+
+    /**
+     * Check if asset path should be skipped (package folders, folders without extensions)
+     */
+    _shouldSkipAsset(assetPath, importerType = null) {
+        const pathParts = assetPath.split('/');
+        const lastPart = pathParts[pathParts.length - 1] || '';
+        
+        // Skip package folders
+        if (lastPart.startsWith('com.') && pathParts.length <= 2) {
+            return true;
+        }
+        
+        // Skip DefaultImporter folders without extensions
+        if (importerType === 'DefaultImporter' && !lastPart.includes('.')) {
+            return true;
+        }
+        
+        // Skip folders without extensions (unless they have a valid importer)
+        if (!lastPart.includes('.') && !importerType) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Calculate wall-to-wall time from timestamps, falling back to explicit time
+     * @param {string|null} startTimestamp - Start timestamp (ISO format)
+     * @param {string|null} endTimestamp - End timestamp (ISO format)
+     * @param {number} explicitTimeSeconds - Explicit time from log (fallback)
+     * @returns {{timeSeconds: number, timeMs: number}} Calculated time
+     */
+    _calculateWallTime(startTimestamp, endTimestamp, explicitTimeSeconds) {
+        const explicitTimeMs = explicitTimeSeconds * 1000;
+        
+        if (startTimestamp && endTimestamp) {
+            const startTime = new Date(startTimestamp).getTime();
+            const endTime = new Date(endTimestamp).getTime();
+            const wallTimeMs = endTime - startTime;
+            if (wallTimeMs > 0) {
+                return {
+                    timeSeconds: wallTimeMs / 1000,
+                    timeMs: wallTimeMs
+                };
+            }
+        }
+        
+        return {
+            timeSeconds: explicitTimeSeconds,
+            timeMs: explicitTimeMs
+        };
+    }
+
+    /**
+     * Create asset import object
+     * @param {Object} params - Asset import parameters
+     * @returns {Object} Asset import object
+     */
+    _createAssetImport({
+        logId,
+        lineNumber,
+        assetPath,
+        guid,
+        artifactId = null,
+        importerType = null,
+        timeSeconds,
+        timeMs,
+        startTimestamp = null,
+        endTimestamp = null,
+        isAnimation = false
+    }) {
+        // Infer importer type if missing
+        if (!importerType) {
+            const ext = this._getExtension(assetPath);
+            importerType = this.importerMap[ext] || null;
+        }
+
+        const assetName = this._getFilename(assetPath);
+        let { assetType, category } = this._categorizeAsset(assetPath, importerType);
+        
+        // Override category to "3D Animation" if keyframe reduction was detected
+        if (isAnimation && category === '3D Models') {
+            category = '3D Animation';
+        }
+
+        // Calculate end timestamp if not provided
+        if (!endTimestamp && startTimestamp) {
+            const startTime = new Date(startTimestamp).getTime();
+            endTimestamp = new Date(startTime + timeMs).toISOString();
+        }
+
+        return {
+            log_id: logId,
+            line_number: lineNumber,
+            asset_path: assetPath,
+            asset_name: assetName,
+            asset_type: assetType,
+            asset_category: category,
+            guid: guid,
+            artifact_id: artifactId,
+            importer_type: importerType,
+            import_time_seconds: timeSeconds,
+            import_time_ms: timeMs,
+            start_timestamp: startTimestamp,
+            end_timestamp: endTimestamp
+        };
     }
 
     /**
@@ -809,8 +938,16 @@ class UnityLogParser {
             let inPipelineRefresh = false;
             let pipelineRefreshLines = [];
             let pipelineRefreshStart = 0;
-            const workerStates = {}; // worker_num -> {asset_path, guid, line_number, importer_type}
-            const pendingImports = {}; // guid -> {asset_path, guid, line_number, importer_type}
+            const workerStates = {}; // worker_num -> {asset_path, guid, line_number, importer_type, start_timestamp}
+            const pendingImports = {}; // guid -> {asset_path, guid, line_number, importer_type, start_timestamp, is_animation}
+            
+            // Sprite atlas operation tracking
+            // Track sprite atlas operations that span multiple lines
+            let spriteAtlasState = null; // {atlas_name, start_line, start_timestamp, steps: [{operation_name, duration_ms, timestamp}]}
+            
+            // Script compilation operation tracking
+            // Track script compilation from "NetCoreRuntime/dotnet" exec to "*** Tundra"
+            let scriptCompilationState = null; // {start_line, start_timestamp, assembly_name}
             
             let totalLines = 0;
 
@@ -840,6 +977,15 @@ class UnityLogParser {
             // Track processing statistics
             let linesProcessedCount = 0;
             
+            // Track error and warning counts for fast retrieval
+            let errorCount = 0;
+            let warningCount = 0;
+            
+            // Track first and last timestamps for timeline sizing
+            let firstTimestamp = null;
+            let lastTimestamp = null;
+            let hasTimestamps = false;
+            
             // Line processing callback - logId is always available now
             const processLine = (line, lineNumber) => {
                 totalLines = lineNumber;
@@ -860,6 +1006,21 @@ class UnityLogParser {
                 // Prepare log line data (we'll add this to logLines at the end, regardless of parsing)
                 const { lineType, indentLevel, isError, isWarning } = this._classifyLine(line);
                 const timestamp = this._extractTimestamp(line);
+                
+                // Track error and warning counts
+                if (isError) errorCount++;
+                if (isWarning) warningCount++;
+                
+                // Track first and last timestamps if present
+                if (timestamp) {
+                    hasTimestamps = true;
+                    if (!firstTimestamp || timestamp < firstTimestamp) {
+                        firstTimestamp = timestamp;
+                    }
+                    if (!lastTimestamp || timestamp > lastTimestamp) {
+                        lastTimestamp = timestamp;
+                    }
+                }
                 const logLineData = {
                     log_id: logId,
                     line_number: lineNumber,
@@ -886,7 +1047,8 @@ class UnityLogParser {
                                 asset_path: startMatch[1],
                                 guid: startMatch[2],
                                 line_number: lineNumber,
-                                importer_type: null
+                                importer_type: null,
+                                start_timestamp: timestamp // Store start timestamp for wall-to-wall time calculation
                             };
                             logLines.push(logLineData);
                             return;
@@ -913,53 +1075,35 @@ class UnityLogParser {
                         const artifactMatch = workerLine.match(artifactPattern);
                         if (artifactMatch && workerStates[workerNum]) {
                             const artifactId = artifactMatch[1];
-                            const timeSeconds = parseFloat(artifactMatch[2]);
-                            const timeMs = timeSeconds * 1000;
-
+                            const explicitTimeSeconds = parseFloat(artifactMatch[2]);
                             const state = workerStates[workerNum];
-                            let importerType = state.importer_type;
-
-                            if (importerType === '-1' || !importerType) {
-                                importerType = null;
-                            }
-
-                            // Infer importer type if missing
-                            if (!importerType) {
-                                const ext = this._getExtension(state.asset_path);
-                                importerType = this.importerMap[ext] || 'UnknownImporter';
-                            }
-
-                            // Skip package folders
-                            const pathParts = state.asset_path.split('/');
-                            const lastPart = pathParts[pathParts.length - 1] || '';
-                            if (lastPart.startsWith('com.') && state.asset_path.split('/').length <= 2) {
-                                delete workerStates[workerNum];
-                                logLines.push(logLineData);
-                                return;
-                            }
-                            if (!lastPart.includes('.')) {
+                            
+                            if (this._shouldSkipAsset(state.asset_path, state.importer_type)) {
                                 delete workerStates[workerNum];
                                 logLines.push(logLineData);
                                 return;
                             }
 
-                            const assetName = this._getFilename(state.asset_path);
-                            const { assetType, category } = this._categorizeAsset(state.asset_path, importerType);
+                            const { timeSeconds, timeMs } = this._calculateWallTime(
+                                state.start_timestamp,
+                                timestamp,
+                                explicitTimeSeconds
+                            );
 
-                            assetImports.push({
-                                log_id: logId,
-                                line_number: state.line_number,
-                                asset_path: state.asset_path,
-                                asset_name: assetName,
-                                asset_type: assetType,
-                                asset_category: category,
+                            const assetImport = this._createAssetImport({
+                                logId,
+                                lineNumber: state.line_number,
+                                assetPath: state.asset_path,
                                 guid: state.guid,
-                                artifact_id: artifactId,
-                                importer_type: importerType,
-                                import_time_seconds: timeSeconds,
-                                import_time_ms: timeMs
+                                artifactId,
+                                importerType: state.importer_type,
+                                timeSeconds,
+                                timeMs,
+                                startTimestamp: state.start_timestamp,
+                                endTimestamp: timestamp
                             });
 
+                            assetImports.push(assetImport);
                             delete workerStates[workerNum];
                             logLines.push(logLineData);
                             return;
@@ -969,64 +1113,216 @@ class UnityLogParser {
                     return;
                 }
 
+                // Check for artifact ID completion for sprite atlas operations FIRST
+                // This must come before regular pending imports to avoid conflicts
+                // This comes after "Packing completed." and is the final completion
+                if (line.includes('-> (artifact id:') && !line.includes('[Worker') && spriteAtlasState) {
+                    const artifactPattern = /-> \(artifact id: '([a-f0-9]+)'\) in ([\d.]+) seconds/;
+                    const artifactMatch = line.match(artifactPattern);
+                    if (artifactMatch) {
+                        const artifactId = artifactMatch[1];
+                        const explicitTimeSeconds = parseFloat(artifactMatch[2]);
+                        const atlasName = spriteAtlasState.atlas_name || 'Unknown Atlas';
+                        
+                        const { timeSeconds, timeMs } = this._calculateWallTime(
+                            spriteAtlasState.start_timestamp,
+                            timestamp,
+                            explicitTimeSeconds
+                        );
+                        
+                        // Create asset import entry for sprite pack
+                        // Sprite packs get their own category, separate from Textures
+                        assetImports.push({
+                            log_id: logId,
+                            line_number: spriteAtlasState.start_line,
+                            asset_path: `SpriteAtlas/${atlasName}`,
+                            asset_name: atlasName,
+                            asset_type: 'Sprite Pack',
+                            asset_category: 'Sprite Pack',
+                            guid: null, // Sprite atlases don't have GUIDs in the same way
+                            artifact_id: artifactId,
+                            importer_type: 'SpriteAtlasImporter',
+                            import_time_seconds: timeSeconds,
+                            import_time_ms: timeMs,
+                            start_timestamp: spriteAtlasState.start_timestamp || null,
+                            end_timestamp: timestamp || null
+                        });
+                        
+                        spriteAtlasState = null;
+                        logLines.push(logLineData);
+                        return;
+                    }
+                }
+
                 // Check for artifact ID completion for pending imports
                 if (line.includes('-> (artifact id:') && !line.includes('[Worker')) {
                     const artifactPattern = /-> \(artifact id: '([a-f0-9]+)'\) in ([\d.]+) seconds/;
                     const artifactMatch = line.match(artifactPattern);
                     if (artifactMatch && Object.keys(pendingImports).length > 0) {
                         const artifactId = artifactMatch[1];
-                        const timeSeconds = parseFloat(artifactMatch[2]);
-                        const timeMs = timeSeconds * 1000;
-
-                        // Find most recent pending import
-                        const guids = Object.keys(pendingImports);
-                        const guid = guids[guids.length - 1];
-                        if (guid && pendingImports[guid]) {
+                        const explicitTimeSeconds = parseFloat(artifactMatch[2]);
+                        
+                        // Find the pending import that best matches this completion
+                        // Try to match by timing: find the pending import whose start time + explicit time
+                        // is closest to the current timestamp
+                        let bestMatch = null;
+                        let bestGuid = null;
+                        let bestTimeDiff = Infinity;
+                        
+                        const currentTimestamp = timestamp ? new Date(timestamp).getTime() : null;
+                        
+                        for (const guid of Object.keys(pendingImports)) {
                             const state = pendingImports[guid];
-                            const assetName = this._getFilename(state.asset_path);
-                            const { assetType, category } = this._categorizeAsset(state.asset_path, state.importer_type);
-
-                            assetImports.push({
-                                log_id: logId,
-                                line_number: state.line_number,
-                                asset_path: state.asset_path,
-                                asset_name: assetName,
-                                asset_type: assetType,
-                                asset_category: category,
+                            if (state.start_timestamp && currentTimestamp) {
+                                const startTime = new Date(state.start_timestamp).getTime();
+                                const expectedEndTime = startTime + (explicitTimeSeconds * 1000);
+                                const timeDiff = Math.abs(currentTimestamp - expectedEndTime);
+                                
+                                // Prefer matches where the timing is close (within 5 seconds)
+                                if (timeDiff < bestTimeDiff && timeDiff < 5000) {
+                                    bestTimeDiff = timeDiff;
+                                    bestMatch = state;
+                                    bestGuid = guid;
+                                }
+                            }
+                        }
+                        
+                        // Fallback to most recent pending import if no timing match found
+                        if (!bestMatch) {
+                            const guids = Object.keys(pendingImports);
+                            bestGuid = guids[guids.length - 1];
+                            bestMatch = pendingImports[bestGuid];
+                        }
+                        
+                        if (bestMatch && bestGuid) {
+                            const state = bestMatch;
+                            const { timeSeconds, timeMs } = this._calculateWallTime(
+                                state.start_timestamp,
+                                timestamp,
+                                explicitTimeSeconds
+                            );
+                            
+                            const assetImport = this._createAssetImport({
+                                logId,
+                                lineNumber: state.line_number,
+                                assetPath: state.asset_path,
                                 guid: state.guid,
-                                artifact_id: artifactId,
-                                importer_type: state.importer_type,
-                                import_time_seconds: timeSeconds,
-                                import_time_ms: timeMs
+                                artifactId,
+                                importerType: state.importer_type,
+                                timeSeconds,
+                                timeMs,
+                                startTimestamp: state.start_timestamp,
+                                endTimestamp: timestamp,
+                                isAnimation: state.is_animation
                             });
 
-                            delete pendingImports[guid];
+                            assetImports.push(assetImport);
+                            delete pendingImports[bestGuid];
                         }
                         logLines.push(logLineData);
                         return;
                     }
                 }
 
+                // Sprite Atlas import detection - must come BEFORE general "Start importing" check
+                // Check for sprite atlas import start (the actual start of the import, not when "Generating Atlas Masks" appears)
+                if (line.includes('Start importing') && !line.includes('[Worker') && line.includes('.spriteatlasv2')) {
+                    const startPattern = /Start importing (.+?\.spriteatlasv2) using Guid\(([a-f0-9]+)\)/;
+                    const startMatch = line.match(startPattern);
+                    if (startMatch) {
+                        const spriteAtlasPath = startMatch[1];
+                        const guid = startMatch[2];
+                        // Extract atlas name from path (e.g., "Assets/SpriteAtlases/VRChatSprites.spriteatlasv2" -> "VRChatSprites")
+                        const pathParts = spriteAtlasPath.split('/');
+                        const fileName = pathParts[pathParts.length - 1];
+                        const atlasName = fileName.replace('.spriteatlasv2', '');
+                        
+                        // Initialize sprite atlas state with the actual start timestamp
+                        spriteAtlasState = {
+                            atlas_name: atlasName, // Set from path, may be updated from "Processing Atlas" line
+                            start_line: lineNumber,
+                            start_timestamp: timestamp, // Use the "Start importing" timestamp as the actual start
+                            guid: guid,
+                            steps: []
+                        };
+                        logLines.push(logLineData);
+                        return; // Don't process as regular asset import
+                    }
+                }
+                
                 // Non-worker thread asset imports
                 if (line.includes('Start importing') && !line.includes('[Worker')) {
-                    const importData = this._parseAssetImport(line, lineNumber);
+                    const importData = this._parseAssetImport(line, lineNumber, timestamp);
                     
                     if (importData) {
+                        // Single-line import (start and completion on same line)
+                        // For single-line imports, the explicit time is correct
+                        // (timestamps would be the same or very close)
                         importData.log_id = logId;
                         assetImports.push(importData);
                     } else {
-                        // Check if this is a pending import (multi-line case)
-                        const startPattern = /Start importing (.+?) using Guid\(([a-f0-9]+)\) \(([A-Za-z0-9]+)\)/;
+                        // This is a multi-line import (start without completion on same line)
+                        // Extract GUID and path to store as pending
+                        // Pattern: Start importing PATH using Guid(GUID) [rest of line]
+                        const startPattern = /Start importing (.+?) using Guid\(([a-f0-9]+)\)/;
                         const startMatch = line.match(startPattern);
                         if (startMatch) {
-                            pendingImports[startMatch[2]] = {
-                                asset_path: startMatch[1],
-                                guid: startMatch[2],
+                            const assetPath = startMatch[1];
+                            const guid = startMatch[2];
+                            
+                            // Extract importer type if present: Importer(ImporterType) or Importer(-1,...)
+                            const importerMatch = line.match(/Importer\(([^)]+)\)/);
+                            const importerType = importerMatch ? this._extractImporterType(importerMatch[0]) : null;
+                            
+                            // Store as pending with start timestamp for wall-to-wall time calculation
+                            pendingImports[guid] = {
+                                asset_path: assetPath,
+                                guid: guid,
                                 line_number: lineNumber,
-                                importer_type: startMatch[3]
+                                importer_type: importerType,
+                                start_timestamp: timestamp, // Store start timestamp for wall-to-wall time
+                                is_animation: false // Will be set to true if "Keyframe reduction" message appears
                             };
+                            
+                            // Check if this line also contains "Keyframe reduction" (can happen on same line)
+                            if (line.includes('Keyframe reduction:')) {
+                                pendingImports[guid].is_animation = true;
+                            }
                         }
                     }
+                }
+                
+                // Check for "Keyframe reduction" messages - indicates animation import
+                // These can appear on worker threads, so we check all pending imports
+                // This check must come AFTER "Start importing" so pending imports are created first
+                if (line.includes('Keyframe reduction:')) {
+                    // Mark all pending FBX imports as animations (keyframe reduction indicates animation processing)
+                    // Only mark .fbx files since keyframe reduction is specific to animation imports
+                    // Prefer marking imports in Animations folder, but mark any FBX if no Animations folder imports exist
+                    const animationsFolderImports = Object.keys(pendingImports).filter(guid => {
+                        const pending = pendingImports[guid];
+                        return pending && (pending.asset_path || '').toLowerCase().includes('/animations/') && 
+                               (pending.asset_path || '').toLowerCase().endsWith('.fbx');
+                    });
+                    
+                    if (animationsFolderImports.length > 0) {
+                        // Mark only Animations folder imports
+                        animationsFolderImports.forEach(guid => {
+                            if (pendingImports[guid]) {
+                                pendingImports[guid].is_animation = true;
+                            }
+                        });
+                    } else {
+                        // Fallback: mark all pending FBX imports
+                        Object.keys(pendingImports).forEach(guid => {
+                            const pending = pendingImports[guid];
+                            if (pending && (pending.asset_path || '').toLowerCase().endsWith('.fbx')) {
+                                pending.is_animation = true;
+                            }
+                        });
+                    }
+                    logLines.push(logLineData);
+                    return;
                 }
                 // Pipeline refreshes
                 else if (line.includes('Asset Pipeline Refresh')) {
@@ -1086,19 +1382,135 @@ class UnityLogParser {
                         telemetryData.push(telemetryData_item);
                     }
                 }
-                // Operations
+                // Sprite Atlas Operations - treat as asset imports
+                // Pattern: 
+                // 1. "Start importing Assets/.../Something.spriteatlasv2" appears (actual start - use this timestamp!)
+                // 2. "Sprite Atlas Operation : Generating Atlas Masks" appears (intermediate step)
+                // 3. "Processing Atlas : AtlasName" appears on next line (gives us name, may override path-based name)
+                // 4. "Sprite Atlas Operation : Generate Texture and Render Datas" appears (intermediate step)
+                // 5. "Packing completed." appears
+                // 6. "-> (artifact id: '...') in X seconds" appears (final completion)
+                
+                // Check for "Processing Atlas" line which comes after first sprite atlas operation
+                if (line.includes('Processing Atlas')) {
+                    const atlasMatch = line.match(/Processing Atlas\s*:\s*(.+)/);
+                    if (atlasMatch && spriteAtlasState) {
+                        // Update the atlas name (may override the one from path)
+                        spriteAtlasState.atlas_name = atlasMatch[1].trim();
+                    }
+                    logLines.push(logLineData);
+                    return;
+                }
+                
+                // Check for Sprite Atlas Operation lines
+                if (line.includes('Sprite Atlas Operation')) {
+                    const opData = this._parseOperation(line, lineNumber, logId);
+                    if (opData && opData.operation_type === 'Sprite Atlas Operation') {
+                        // If spriteAtlasState doesn't exist yet, create it (fallback for cases without "Start importing" line)
+                        if (!spriteAtlasState) {
+                            if (opData.operation_name.includes('Generating Atlas Masks')) {
+                                spriteAtlasState = {
+                                    atlas_name: null, // Will be set from next "Processing Atlas" line
+                                    start_line: lineNumber,
+                                    start_timestamp: timestamp, // Fallback: use this timestamp if no "Start importing" line found
+                                    steps: [{
+                                        operation_name: opData.operation_name,
+                                        duration_ms: opData.duration_ms,
+                                        timestamp: timestamp
+                                    }]
+                                };
+                            }
+                        } else {
+                            // spriteAtlasState already exists (from "Start importing" line)
+                            // Just track this as a step, but keep the original start_timestamp
+                            spriteAtlasState.steps.push({
+                                operation_name: opData.operation_name,
+                                duration_ms: opData.duration_ms,
+                                timestamp: timestamp
+                            });
+                        }
+                        logLines.push(logLineData);
+                        return;
+                    }
+                }
+                
+                // Operations (non-sprite atlas)
                 else if (line.includes('Operation') && line.includes('took') && line.includes('sec')) {
                     const opData = this._parseOperation(line, lineNumber, logId);
-                    if (opData) {
+                    if (opData && opData.operation_type !== 'Sprite Atlas Operation') {
                         operations.push(opData);
                     }
                 }
-                // Tundra operations
+                // Script compilation detection - must come BEFORE Tundra check
+                // Check for raw "NetCoreRuntime/dotnet" exec line - this is the actual start
+                // Note: This line may not have a timestamp, so we'll calculate start time from Tundra end time - explicit time
+                if (line.includes('NetCoreRuntime/dotnet') && line.includes('exec') && !line.includes('## CmdLine:')) {
+                    // Extract assembly name from the .rsp file path if available
+                    // Pattern: "@Library/Bee/artifacts/.../Assembly-CSharp.rsp"
+                    let assemblyName = 'Unknown Assembly';
+                    const rspMatch = line.match(/@Library\/Bee\/artifacts\/[^\/]+\/([^\.]+)\.rsp/);
+                    if (rspMatch) {
+                        assemblyName = rspMatch[1];
+                    }
+                    
+                    // Initialize script compilation state
+                    // If this line has a timestamp, use it; otherwise we'll calculate from Tundra line
+                    scriptCompilationState = {
+                        start_line: lineNumber,
+                        start_timestamp: timestamp, // May be null if line has no timestamp
+                        assembly_name: assemblyName
+                    };
+                    logLines.push(logLineData);
+                    return;
+                }
+                
+                // Tundra operations - end of script compilation
                 else if (line.includes('*** Tundra') && line.includes('seconds')) {
                     const tundraData = this._parseTundraOperation(line, lineNumber, logId);
                     if (tundraData) {
-                        operations.push(tundraData);
+                        // If we have script compilation state, use it for wall-to-wall time
+                        if (scriptCompilationState) {
+                            const explicitTimeSeconds = tundraData.duration_seconds;
+                            let startTimestamp = scriptCompilationState.start_timestamp;
+                            
+                            // If no start timestamp, calculate it from end timestamp minus explicit time
+                            if (!startTimestamp && timestamp) {
+                                const endTime = new Date(timestamp).getTime();
+                                const calculatedStartTime = endTime - (explicitTimeSeconds * 1000);
+                                // Preserve full precision (including milliseconds) when available
+                                startTimestamp = new Date(calculatedStartTime).toISOString();
+                            }
+                            
+                            const { timeSeconds, timeMs } = this._calculateWallTime(
+                                startTimestamp,
+                                timestamp,
+                                explicitTimeSeconds
+                            );
+                            
+                            // Create script compilation operation
+                            operations.push({
+                                log_id: logId,
+                                line_number: scriptCompilationState.start_line,
+                                operation_type: 'Script Compilation',
+                                operation_name: `${scriptCompilationState.assembly_name} - ${tundraData.operation_name}`,
+                                duration_seconds: timeSeconds,
+                                duration_ms: timeMs,
+                                memory_mb: null,
+                                start_timestamp: startTimestamp,
+                                end_timestamp: timestamp
+                            });
+                            
+                            scriptCompilationState = null;
+                        } else {
+                            // No script compilation state - treat as regular Tundra operation
+                            // Add timestamps if available
+                            tundraData.start_timestamp = timestamp; // Use Tundra line timestamp as both start and end if no state
+                            tundraData.end_timestamp = timestamp;
+                            operations.push(tundraData);
+                        }
                     }
+                    logLines.push(logLineData);
+                    return;
                 }
 
                 // Store log line for viewer (for lines that didn't match any special pattern above)
@@ -1149,9 +1561,17 @@ class UnityLogParser {
             // Report final total lines for progress calculation
             this._reportProgress(`Total lines: ${totalLines}`);
             
-            // Update total lines in metadata
+            // Update metadata with total_lines and timestamps IMMEDIATELY (before storing data)
+            // This ensures timestamps are available when dashboard loads, even if log lines are still being stored
             await this.db.open();
-            await this.db.db.log_metadata.update(logId, { total_lines: totalLines });
+            const metadataUpdate = { total_lines: totalLines };
+            if (hasTimestamps && firstTimestamp && lastTimestamp) {
+                metadataUpdate.start_timestamp = firstTimestamp;
+                metadataUpdate.end_timestamp = lastTimestamp;
+                this._reportProgress(`Timestamps found: ${firstTimestamp} to ${lastTimestamp}`);
+                console.log(`[Parser] Storing timestamps in metadata: ${firstTimestamp} to ${lastTimestamp}`);
+            }
+            await this.db.db.log_metadata.update(logId, metadataUpdate);
 
             // Store all parsed data in batches
             this._reportProgress(`Storing ${assetImports.length} asset imports...`);
@@ -1205,11 +1625,15 @@ class UnityLogParser {
                 await this.db.bulkInsertOperations(operations);
             }
 
-            // Update parse time
+            // Update parse time, error count, and warning count (timestamps already stored above)
             const endTime = performance.now();
             const parseDuration = endTime - startTime;
             await this.db.open();
-            await this.db.db.log_metadata.update(logId, { total_parse_time_ms: parseDuration });
+            await this.db.db.log_metadata.update(logId, {
+                total_parse_time_ms: parseDuration,
+                error_count: errorCount,
+                warning_count: warningCount
+            });
 
             this._reportProgress(`Storing ${logLines.length} log lines for viewer...`);
             // Log lines will be stored by the caller using bulkInsertLogLines (with worker support)

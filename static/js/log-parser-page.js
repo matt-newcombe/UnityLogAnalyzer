@@ -137,8 +137,6 @@ const progressBars = new Map();
 // Define the order in which progress bars should appear
 const PROGRESS_BAR_ORDER = [
     'reading',
-    'parsing',
-    'storing_log_lines',
     'receiving_asset_imports',
     'receiving_log_lines',
     'storing_log_lines_indexeddb'
@@ -924,9 +922,16 @@ async function storeParsedDataInIndexedDB(logId) {
             closeLogParser(); // This keeps the worker alive
             
             // Force API client to refresh database connection to ensure it uses the new database
-            if (window.apiClient && window.apiClient.db) {
-                window.apiClient.db.close().catch(() => {}); // Close old connection
-                window.apiClient.db = null; // Clear cache
+            if (window.apiClient) {
+                if (window.apiClient.db) {
+                    window.apiClient.db.close().catch(() => {}); // Close old connection
+                }
+                window.apiClient.db = null; // Clear cache to force fresh connection
+                // Also clear any cached version info
+                if (window.getCurrentDbVersion) {
+                    // Force refresh by clearing any cached version
+                    console.log('[Parser] Forcing database connection refresh');
+                }
             }
             
             // Clear dashboard content first to prevent showing stale data
@@ -981,10 +986,6 @@ async function handleFileSelect(event) {
         // Initialize reading progress bar at the start
         updateProgressBar('reading', 'Reading log file', 0, null);
         
-        // Track parsing state
-        let parsingTotalLines = null;
-        let parsingStartTime = null;
-        
         // Create parser instance
         const progressCallback = (message) => {
             // Check if this is a reading progress message (don't add to log, just update progress bar)
@@ -1026,43 +1027,6 @@ async function handleFileSelect(event) {
             
             // For all other messages, add to log
             updateStorageProgress(message);
-            
-            const totalLinesMatch = message.match(/Total lines:\s*(\d+)/i);
-            if (totalLinesMatch) {
-                const newTotal = parseInt(totalLinesMatch[1], 10);
-                // Update total if we don't have one yet, or if the new total is larger (refined estimate)
-                if (!parsingTotalLines || newTotal > parsingTotalLines) {
-                    parsingTotalLines = newTotal;
-                    if (!parsingStartTime) {
-                        parsingStartTime = Date.now();
-                        updateProgressBar('parsing', 'Parsing log file', 0, null);
-                    }
-                    updateProgressBar('storing_log_lines', 'Reformatting log lines for viewer', 0, null);
-                }
-            }
-            
-            const processedMatch = message.match(/Processed\s+(\d+)\s+lines/i);
-            if (processedMatch) {
-                const processed = parseInt(processedMatch[1], 10);
-                
-                // If we have a total, calculate exact progress
-                if (parsingTotalLines && processed <= parsingTotalLines) {
-                    const percent = (processed / parsingTotalLines) * 100;
-                    
-                    // Calculate estimated time remaining
-                    let estimatedTimeRemaining = null;
-                    if (parsingStartTime && percent > 0) {
-                        const elapsed = (Date.now() - parsingStartTime) / 1000; // seconds
-                        const totalTime = (elapsed / percent) * 100;
-                        estimatedTimeRemaining = Math.max(0, totalTime - elapsed);
-                    }
-                    
-                    updateProgressBar('parsing', 'Parsing log file', percent, estimatedTimeRemaining);
-                } else if (!parsingTotalLines) {
-                    // If we don't have total yet, show a minimal progress (just to indicate activity)
-                    updateProgressBar('parsing', 'Parsing log file', 1, null);
-                }
-            }
         };
         
         const parser = new UnityLogParser(db, progressCallback);
@@ -1073,9 +1037,8 @@ async function handleFileSelect(event) {
         const { logId, logLines } = await parser.parseLogFile(file, batchCancelSignal);
         window.readingStartTime = null; // Clear after completion
         
-        // Mark reading and parsing as complete
+        // Mark reading as complete
         completeProgressBar('reading');
-        completeProgressBar('parsing');
         
         // Store log lines using the existing worker system
         if (logLines.length > 0) {
@@ -1175,9 +1138,6 @@ async function handleFileSelect(event) {
             // Store worker reference for cancellation
             window.currentLogLinesWorker = worker;
         }
-        
-        // Complete the reformatting phase (even if log lines are still processing)
-        completeProgressBar('storing_log_lines');
         
         // Show completion
         updateStorageProgress('✓ Parsing complete!');

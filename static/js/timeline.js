@@ -9,14 +9,33 @@
  */
 function displayTimeline(data) {
     const container = document.getElementById('timeline-container');
+    const startTime = performance.now();
+    console.log('[Timeline] Starting timeline load...');
     
-    // Fetch timeline data
-    window.apiClient.getTimeline()
-        .then(timelineData => {
-            renderTimelineVisualization(container, timelineData);
+    // Fetch both timeline data and summary to get category breakdown for color matching
+    const timelineStart = performance.now();
+    Promise.all([
+        window.apiClient.getTimeline(),
+        window.apiClient.getSummary()
+    ])
+        .then(([timelineData, summary]) => {
+            const apiTime = performance.now() - timelineStart;
+            console.log(`[Timeline] API calls completed in ${apiTime.toFixed(2)}ms`);
+            
+            // Extract category data from summary (same as used by category chart)
+            const categoryData = summary.by_category || [];
+            
+            const renderStart = performance.now();
+            renderTimelineVisualization(container, timelineData, categoryData);
+            const renderTime = performance.now() - renderStart;
+            const totalTime = performance.now() - startTime;
+            
+            console.log(`[Timeline] Rendering completed in ${renderTime.toFixed(2)}ms`);
+            console.log(`[Timeline] Total timeline load time: ${totalTime.toFixed(2)}ms (API: ${apiTime.toFixed(2)}ms, Render: ${renderTime.toFixed(2)}ms)`);
         })
         .catch(error => {
-            console.error('Failed to load timeline:', error);
+            const totalTime = performance.now() - startTime;
+            console.error(`[Timeline] Failed to load timeline after ${totalTime.toFixed(2)}ms:`, error);
             container.innerHTML = '<p style="color: #ff4444;">Failed to load timeline data</p>';
         });
 }
@@ -25,8 +44,9 @@ function displayTimeline(data) {
  * Render the timeline visualization with segments
  * @param {HTMLElement} container - Container element
  * @param {Object} timelineData - Timeline data from API
+ * @param {Array} categoryData - Category breakdown data from API (to match chart colors)
  */
-function renderTimelineVisualization(container, timelineData) {
+function renderTimelineVisualization(container, timelineData, categoryData = []) {
     if (!timelineData || !timelineData.segments) {
         console.error('Invalid timeline data:', timelineData);
         container.innerHTML = '<p style="color: #ff4444;">Invalid timeline data</p>';
@@ -37,65 +57,82 @@ function renderTimelineVisualization(container, timelineData) {
     const segments = timelineData.segments || [];
     const summary = timelineData.summary || {};
     
-    // Category colors - must match the category chart
+    // Category colors - must match the category chart exactly
+    // Top colors are more distinct to avoid similar bluey-purple shades
     const categoryChartColors = [
-        '#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe',
-        '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#330867',
-        '#a8edea', '#fed6e3', '#ffecd2', '#fcb69f', '#ff9a9e'
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+        '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B739', '#52BE80',
+        '#EC7063', '#5DADE2', '#F1948A', '#82E0AA', '#F4D03F'
     ];
     
-    // Calculate total time per category from segments
-    const categoryTimes = {};
-    segments.filter(s => s.phase === 'AssetImports' && s.category).forEach(s => {
-        if (!categoryTimes[s.category]) {
-            categoryTimes[s.category] = 0;
-        }
-        categoryTimes[s.category] += s.duration_ms;
-    });
-    
-    // Sort categories by total time (descending) to match category chart order
-    const uniqueCategories = Object.keys(categoryTimes).sort((a, b) => {
-        return categoryTimes[b] - categoryTimes[a];  // Descending order
-    });
-    
-    // Create category -> color mapping based on time-sorted position
+    // Use category data from API to ensure exact match with chart
+    // Category data is already sorted by total_time (descending) - same as chart
     const categoryColors = {};
-    uniqueCategories.forEach((category, index) => {
-        categoryColors[category] = categoryChartColors[index % categoryChartColors.length];
-    });
+    if (categoryData && categoryData.length > 0) {
+        // Use the exact same order and colors as the category chart
+        categoryData.forEach((category, index) => {
+            const categoryName = category.asset_category || category.category || 'Other';
+            categoryColors[categoryName] = categoryChartColors[index % categoryChartColors.length];
+        });
+    } else {
+        // Fallback: calculate from segments if category data not available
+        const categoryTimes = {};
+        segments.filter(s => s.phase === 'AssetImports' && s.category).forEach(s => {
+            if (!categoryTimes[s.category]) {
+                categoryTimes[s.category] = 0;
+            }
+            categoryTimes[s.category] += s.duration_ms;
+        });
+        
+        const uniqueCategories = Object.keys(categoryTimes).sort((a, b) => {
+            return categoryTimes[b] - categoryTimes[a];  // Descending order
+        });
+        
+        uniqueCategories.forEach((category, index) => {
+            categoryColors[category] = categoryChartColors[index % categoryChartColors.length];
+        });
+    }
+    
+    // Get unique categories for legend (use categoryData order if available, otherwise from segments)
+    const uniqueCategories = categoryData && categoryData.length > 0
+        ? categoryData.map(c => c.asset_category || c.category || 'Other')
+        : Object.keys(categoryColors);
     
     // Create timeline HTML
     let html = `
         <div style="margin-bottom: 10px;">
             <h3 style="font-size: 1.8em; color: #667eea; margin-bottom: 8px;">
-                Project Load Timeline
+                Log Timeline
             </h3>
             <p style="color: #666; font-size: 0.9em; margin-bottom: 10px;">
-                ${(() => {
-                    const parts = [`Total time: ${formatTime(totalTime)}`];
-                    if (summary.scan_time_ms > 0) parts.push(`Scan: ${formatTime(summary.scan_time_ms / 1000)}`);
-                    if (summary.categorize_time_ms > 0) parts.push(`Categorize: ${formatTime(summary.categorize_time_ms / 1000)}`);
-                    parts.push(`Asset imports: ${formatTime(summary.asset_import_time_ms / 1000)}`);
-                    if (summary.operations_time_ms > 0) parts.push(`Operations: ${formatTime(summary.operations_time_ms / 1000)}`);
-                    if (summary.script_compilation_time_ms > 0) parts.push(`Script compilation: ${formatTime(summary.script_compilation_time_ms / 1000)}`);
-                    if (summary.post_process_time_ms > 0) parts.push(`Post-process: ${formatTime(summary.post_process_time_ms / 1000)}`);
-                    if (summary.import_overhead_time_ms > 0) parts.push(`Import overhead: ${formatTime(summary.import_overhead_time_ms / 1000)}`);
-                    if (summary.untracked_time_ms > 0) parts.push(`Untracked: ${formatTime(summary.untracked_time_ms / 1000)}`);
-                    parts.push(`Unknown time: ${formatTime(summary.unknown_time_ms / 1000)}`);
-                    return parts.join(' | ');
-                })()}
+                Total time: ${formatTime(totalTime)} | Asset imports: ${formatTime(summary.asset_import_time_ms / 1000)} | Total imports: ${summary.total_imports || 0}
             </p>
         </div>
         
         <div style="position: relative; width: 100%; height: 80px; background: #f5f5f5; border-radius: 8px; overflow: hidden; margin-bottom: 15px;">
     `;
     
-    // Render sequential segments (non-overlapping)
-    const sequentialSegments = segments.filter(s => !s.overlaps);
+    // Render all segments (using timestamps for accurate positioning)
+    // Normalize all positions and widths relative to total_time_ms
+    // Formula: width = (duration_ms / total_time_ms) * 100%
+    // Formula: position = (start_time / total_time_ms) * 100%
+    const totalTimeMs = timelineData.total_time_ms;
     
-    sequentialSegments.forEach((segment, index) => {
-        const widthPercent = (segment.duration_ms / timelineData.total_time_ms) * 100;
-        const leftPercent = (segment.start_time / timelineData.total_time_ms) * 100;
+    if (!totalTimeMs || totalTimeMs <= 0) {
+        console.error('Invalid total_time_ms:', totalTimeMs);
+        container.innerHTML = '<p style="color: #ff4444;">Invalid timeline data: total time is zero or missing</p>';
+        return;
+    }
+    
+    segments.forEach((segment, index) => {
+        // Ensure segment has valid values
+        const durationMs = segment.duration_ms || 0;
+        const startTime = segment.start_time || 0;
+        
+        // Calculate width as proportion of total time: duration_ms / total_time_ms
+        const widthPercent = Math.max(0, Math.min(100, (durationMs / totalTimeMs) * 100));
+        // Calculate position as proportion of total time: start_time / total_time_ms
+        const leftPercent = Math.max(0, Math.min(100, (startTime / totalTimeMs) * 100));
         
         // Use category color for AssetImports segments
         let segmentColor = segment.color;
@@ -129,20 +166,22 @@ function renderTimelineVisualization(container, timelineData) {
     
     html += `</div>`;
     
-    // Legend - show top 5 categories only
+    // Legend - show top 10 categories
     html += `
         <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; margin-top: 15px;">
     `;
     
-    const top5Categories = uniqueCategories.slice(0, 5);
-    top5Categories.forEach(category => {
+    const top10Categories = uniqueCategories.slice(0, 10);
+    top10Categories.forEach(category => {
         const color = categoryColors[category];
-        html += `
-            <div style="display: flex; align-items: center; gap: 5px;">
-                <div style="width: 20px; height: 20px; background: ${color}; border-radius: 3px;"></div>
-                <span style="font-size: 0.9em;">${category}</span>
-            </div>
-        `;
+        if (color) {
+            html += `
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <div style="width: 20px; height: 20px; background: ${color}; border-radius: 3px;"></div>
+                    <span style="font-size: 0.9em;">${category}</span>
+                </div>
+            `;
+        }
     });
     
     html += `</div>`;

@@ -78,6 +78,8 @@ class APIClient {
 
     async getTimeline() {
         try {
+            // Force a fresh database connection to ensure we get the latest data
+            this.db = null;
             const db = await this.getDatabase();
             return await db.getTimeline(this.currentLogId);
         } catch (error) {
@@ -147,6 +149,26 @@ class APIClient {
             return await db.getPipelineBreakdown(this.currentLogId);
         } catch (error) {
             console.error('Error getting pipeline breakdown:', error);
+            throw error;
+        }
+    }
+
+    async getOperationsBreakdown() {
+        try {
+            const db = await this.getDatabase();
+            return await db.getOperationsBreakdown(this.currentLogId);
+        } catch (error) {
+            console.error('Error getting operations breakdown:', error);
+            throw error;
+        }
+    }
+
+    async getOperationsByType(operationType) {
+        try {
+            const db = await this.getDatabase();
+            return await db.getOperationsByType(operationType, this.currentLogId);
+        } catch (error) {
+            console.error('Error getting operations by type:', error);
             throw error;
         }
     }

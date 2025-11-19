@@ -27,3 +27,5 @@ ENV/
 Thumbs.db
 
 *.log
+local/*
+tests/*

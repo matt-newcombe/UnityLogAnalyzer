@@ -240,7 +240,7 @@
                     </div>
                 </div>
                 <div class="chart-card">
-                    <h2>Script Compilation & Domain Reloads</h2>
+                    <h2>Operations</h2>
                     <div class="chart-container">
                         <div class="element-spinner">
                             <span class="loading-spinner"></span>

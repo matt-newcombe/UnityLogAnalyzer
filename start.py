@@ -18,7 +18,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def guess_type(self, path):
-        mimetype, _ = super().guess_type(path)
+        mimetype = super().guess_type(path)
         if path.endswith('.js'):
             return 'application/javascript'
         if path.endswith('.css'):

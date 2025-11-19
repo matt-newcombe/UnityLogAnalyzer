@@ -15,15 +15,18 @@ const DOMUtils = {
 
     /**
      * Format time in seconds to readable format
+     * Always shows 2 decimal places for precision
      */
     formatTime(seconds) {
         if (seconds >= 3600) {
             const hours = Math.floor(seconds / 3600);
-            const mins = Math.floor((seconds % 3600) / 60);
-            return `${hours}h ${mins}m`;
+            const remainingSeconds = seconds % 3600;
+            const mins = Math.floor(remainingSeconds / 60);
+            const secs = (remainingSeconds % 60).toFixed(2);
+            return `${hours}h ${mins}m ${secs}s`;
         } else if (seconds >= 60) {
             const minutes = Math.floor(seconds / 60);
-            const secs = Math.floor(seconds % 60);
+            const secs = (seconds % 60).toFixed(2);
             return `${minutes}m ${secs}s`;
         }
         return seconds.toFixed(2) + 's';
