@@ -40,37 +40,38 @@ class TimelineBuilder {
             useStoredTimestamps = true;
         }
 
-        // Get imports - use sorted query
+        // Get imports - use index for sorted query (much faster than loading all and sorting in JS)
         const importsStart = performance.now();
-        const imports = await this.db.asset_imports.toCollection().sortBy('line_number');
+        const imports = await this.db.asset_imports
+            .where('log_id').equals(this.logId)
+            .sortBy('line_number');
         const importsTime = performance.now() - importsStart;
 
-        // Get operations - use sorted query
+        // Get operations - use index for sorted query
         const operationsStart = performance.now();
-        const operations = await this.db.processes.toCollection().sortBy('line_number');
+        const operations = await this.db.operations
+            .where('log_id').equals(this.logId)
+            .sortBy('line_number');
         const operationsTime = performance.now() - operationsStart;
-        
-        console.log('[Timeline] Processes/operations found:', operations.length);
-        if (operations.length > 0) {
-            console.log('[Timeline] Sample process:', operations[0]);
-            // Log all process types to see what we have
-            const processTypes = [...new Set(operations.map(op => op.process_type))];
-            console.log('[Timeline] Process types found:', processTypes);
-        }
 
-        // Get cache server download blocks - use sorted query
+        // Get cache server download blocks - use index for sorted query
         const cacheBlocksStart = performance.now();
-        const cacheServerBlocks = await this.db.cache_server_download_blocks.toCollection().sortBy('start_timestamp');
+        const cacheServerBlocks = await this.db.cache_server_download_blocks
+            .where('log_id').equals(this.logId)
+            .sortBy('start_timestamp');
         const cacheBlocksTime = performance.now() - cacheBlocksStart;
 
-        // Get worker thread phases - use sorted query
+        // Get worker thread phases - use index for sorted query
         const workerPhasesStart = performance.now();
-        const workerPhases = await this.db.worker_thread_phases.toCollection().sortBy('start_timestamp');
+        const workerPhases = await this.db.worker_thread_phases
+            .where('log_id').equals(this.logId)
+            .sortBy('start_timestamp');
         const workerPhasesTime = performance.now() - workerPhasesStart;
 
         // Get worker imports - these are asset_imports with non-null worker_thread_id
         const workerImportsStart = performance.now();
         const workerImports = await this.db.asset_imports
+            .where('log_id').equals(this.logId)
             .filter(imp => imp.worker_thread_id !== null && imp.worker_thread_id !== undefined)
             .sortBy('line_number');
         const workerImportsTime = performance.now() - workerImportsStart;
@@ -469,7 +470,7 @@ class TimelineBuilder {
                     } else {
                         console.warn('[Timeline] Invalid start_timestamp for operation:', {
                             line_number: op.line_number,
-                            operation_type: op.operation_type,
+                            operation_type: op.process_type,
                             start_timestamp: op.start_timestamp,
                             opStartTime: opStartTime,
                             startTimeOffset: startTimeOffset
@@ -502,7 +503,7 @@ class TimelineBuilder {
 
                 // Determine phase based on operation type
                 let phase = 'Operation';
-                if (op.operation_type === 'Script Compilation') {
+                if (op.process_type === 'Script Compilation') {
                     phase = 'CompileScripts';
                 }
 
@@ -521,23 +522,12 @@ class TimelineBuilder {
                     phase: phase,
                     start_time: startTime,
                     duration_ms: durationMs,
-                    color: op.operation_type === 'Script Compilation' ? '#9966FF' : '#FF5722',
-                    description: `${op.operation_type}: ${op.operation_name} (${formatTime(durationMs / 1000)})`,
-                    operation_type: op.operation_type,
-                    operation_name: op.operation_name,
+                    color: op.process_type === 'Script Compilation' ? '#9966FF' : '#FF5722',
+                    description: `${op.process_type}: ${op.process_name} (${formatTime(durationMs / 1000)})`,
+                    operation_type: op.process_type,
+                    operation_name: op.process_name,
                     line_number: op.line_number
                 });
-                
-                // Debug log for Asset Pipeline Refresh
-                if (op.operation_type === 'Asset Pipeline Refresh') {
-                    console.log('[Timeline] Created Asset Pipeline Refresh segment:', {
-                        operation_type: op.operation_type,
-                        operation_name: op.operation_name,
-                        phase: phase,
-                        start_time: startTime,
-                        duration_ms: durationMs
-                    });
-                }
             } else if (event.type === 'cache_server_block') {
                 const block = event.data;
                 const durationMs = block.duration_ms || 0;
@@ -771,10 +761,6 @@ class TimelineBuilder {
             return {};
         }
 
-        // Build category color map using centralized logic - use ALL imports to match category chart
-        const categoryColorMap = window.CategoryColors.buildCategoryColorMapFromItems(allImports);
-        console.log('[Timeline] Category color map:', categoryColorMap);
-
         // Group by worker_thread_id
         const workerThreads = {};
         workerImports.forEach(imp => {
@@ -826,13 +812,12 @@ class TimelineBuilder {
                     logicalEndTime = startTime + durationMs;
                 }
 
-                const category = imp.asset_category || 'Other';
                 segments.push({
                     phase: 'WorkerImport',
                     start_time: startTime,
                     duration_ms: durationMs,
-                    color: window.CategoryColors.getCategoryColor(category, categoryColorMap),
-                    category: category,
+                    color: this._getWorkerColor(workerId),
+                    category: imp.asset_category || 'Other',
                     description: `${imp.asset_name || imp.asset_path}`,
                     asset_name: imp.asset_name,
                     asset_path: imp.asset_path,

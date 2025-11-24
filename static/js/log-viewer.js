@@ -5,7 +5,7 @@
 
 /**
  * Open the log viewer overlay at a specific line number or with a filter
- * @param {number|string} lineNumberOrFilter - Line number to highlight and scroll to, or filter type ('error', 'warning', 'import', 'pipeline')
+ * @param {number|string} lineNumberOrFilter - Line number to highlight and scroll to, or filter type ('import', 'pipeline')
  * @param {string} filter - Optional filter type if lineNumberOrFilter is a number
  */
 function openLogViewer(lineNumberOrFilter, filter) {
@@ -41,7 +41,7 @@ function openLogViewer(lineNumberOrFilter, filter) {
 
 /**
  * Open log viewer with a filter using the inline overlay
- * @param {string} filter - Filter to apply ('error', 'warning', 'import', 'pipeline')
+ * @param {string} filter - Filter to apply ('import', 'pipeline')
  */
 function openLogViewerWithFilter(filter) {
     openLogViewer(filter);
@@ -64,7 +64,7 @@ function closeLogViewer() {
 /**
  * Load log content from the API
  * @param {number} lineNumber - Line number to load content around (optional if filter is provided)
- * @param {string} filterType - Filter type ('error', 'warning', 'import', 'pipeline') (optional)
+ * @param {string} filterType - Filter type ('import', 'pipeline') (optional)
  */
 async function loadLogViewerContent(lineNumber, filterType) {
     const content = document.getElementById('log-viewer-content');
@@ -212,7 +212,6 @@ async function loadLogViewerContent(lineNumber, filterType) {
             // No lines found - check if worker just completed and retry with exponential backoff
             const progress = window.getLogLinesProgress ? window.getLogLinesProgress() : null;
             if (data.total_lines > 0) {
-                console.log(`[Log Viewer] No lines found but total_lines = ${data.total_lines}, retrying...`);
                 
                 // Retry up to 3 times with increasing delays
                 let retryCount = 0;
@@ -221,13 +220,11 @@ async function loadLogViewerContent(lineNumber, filterType) {
                 
                 while (retryCount < maxRetries && (!retryData || !retryData.lines || retryData.lines.length === 0)) {
                     const delay = 500 * Math.pow(2, retryCount); // 500ms, 1000ms, 2000ms
-                    console.log(`[Log Viewer] Retry attempt ${retryCount + 1}/${maxRetries} after ${delay}ms delay...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     
                     try {
                         retryData = await window.apiClient.getLogViewer(queryOptions);
                         if (retryData.lines && retryData.lines.length > 0) {
-                            console.log(`[Log Viewer] Successfully loaded ${retryData.lines.length} lines on retry ${retryCount + 1}`);
                             break;
                         }
                     } catch (retryError) {
@@ -289,10 +286,7 @@ function renderLogLines(lines, highlightLine) {
     
     content.innerHTML = lines.map(line => {
         const lineClasses = ['log-viewer-line'];
-        if (line.is_error) lineClasses.push('error');
-        if (line.is_warning) lineClasses.push('warning');
         if (line.line_type) lineClasses.push(line.line_type);
-        if (line.indent_level) lineClasses.push(`indent-${Math.min(line.indent_level, 5)}`);
         if (line.line_number == highlightLine) lineClasses.push('highlighted');
         
         const timestamp = line.timestamp ? `<span class="timestamp">${line.timestamp}</span>` : '';
@@ -341,11 +335,10 @@ function navigateToLogLine(lineNumber) {
 
 /**
  * Filter log viewer content (placeholder for future implementation)
- * @param {string} filter - Filter type ('all', 'error', 'warning', 'import', 'pipeline')
+ * @param {string} filter - Filter type ('all', 'import', 'pipeline')
  */
 function filterLogViewer(filter) {
     // TODO: Implement filtering functionality
-    console.log('Filter log viewer:', filter);
     
     // Update active button state
     document.querySelectorAll('.log-viewer-filter-btn').forEach(btn => {
@@ -359,7 +352,6 @@ function filterLogViewer(filter) {
  */
 function searchLogViewer(query) {
     // TODO: Implement search functionality
-    console.log('Search log viewer:', query);
 }
 
 /**

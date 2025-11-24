@@ -9,25 +9,25 @@ let batchCancelSignal = { cancelled: false };
 /**
  * Open the log parser overlay
  */
-window.openLogParser = function() {
+window.openLogParser = function () {
     const overlay = document.getElementById('log-parser-overlay');
     const panel = document.getElementById('log-parser-panel');
-    
+
     if (!overlay || !panel) {
         console.error('Log parser overlay elements not found');
         return;
     }
-    
+
     // Show overlay using flex display (overrides CSS default)
     overlay.style.display = 'flex';
     overlay.style.alignItems = 'center';
     overlay.style.justifyContent = 'center';
     overlay.style.opacity = '1';
     panel.classList.add('active');
-    
+
     // Prevent body scroll when overlay is open
     document.body.style.overflow = 'hidden';
-    
+
     // Reset parser state
     resetParser();
 };
@@ -36,26 +36,17 @@ window.openLogParser = function() {
  * Cancel all operations and close the parser overlay
  * This is called when the user explicitly clicks the X button
  */
-window.cancelLogParser = function() {
-    console.log('[Parser] User cancelled - terminating all operations...');
-    
+window.cancelLogParser = function () {
+
     // Cancel batch storage operations
     batchCancelSignal.cancelled = true;
-    
+
     // Terminate Web Worker if it exists
-    if (window.logLinesWorker) {
-        console.log('[Parser] Terminating Web Worker...');
-        window.logLinesWorker.terminate();
-        window.logLinesWorker = null;
-    }
-    
-    // Clear worker progress state
-    localStorage.removeItem('log_lines_worker_progress');
-    
+
     // Close the overlay
     const overlay = document.getElementById('log-parser-overlay');
     const panel = document.getElementById('log-parser-panel');
-    
+
     if (overlay) {
         overlay.style.display = 'none';
         overlay.style.opacity = '0';
@@ -63,10 +54,10 @@ window.cancelLogParser = function() {
     if (panel) {
         panel.classList.remove('active');
     }
-    
+
     // Restore body scroll
     document.body.style.overflow = '';
-    
+
     // Reset cancel signal for next time
     batchCancelSignal.cancelled = false;
 };
@@ -76,15 +67,14 @@ window.cancelLogParser = function() {
  * This is called when parsing succeeds and we want to return to dashboard
  * The worker continues processing in the background
  */
-window.closeLogParser = function() {
-    console.log('[Parser] Closing overlay - keeping worker alive if active...');
-    
+window.closeLogParser = function () {
+
     // Don't cancel operations - just close the overlay
     // Worker will continue processing in the background
-    
+
     const overlay = document.getElementById('log-parser-overlay');
     const panel = document.getElementById('log-parser-panel');
-    
+
     if (overlay) {
         overlay.style.display = 'none';
         overlay.style.opacity = '0';
@@ -92,21 +82,49 @@ window.closeLogParser = function() {
     if (panel) {
         panel.classList.remove('active');
     }
-    
+
     // Restore body scroll
     document.body.style.overflow = '';
 };
 
 /**
+ * Close parser and refresh dashboard
+ * Called when user clicks "Close & Refresh Dashboard" button
+ */
+window.closeLogParserAndRefresh = function () {
+    closeLogParser();
+
+    // Force API client to refresh database connection to ensure it uses the new database
+    if (window.apiClient && window.apiClient.db) {
+        window.apiClient.db.close().catch(() => { });
+        window.apiClient.db = null; // Clear cache
+    }
+
+    // Clear dashboard content first to prevent showing stale data
+    if (window.clearDashboard) {
+        window.clearDashboard();
+    }
+
+    // Refresh the dashboard to show the new log
+    if (typeof loadLogList === 'function') {
+        loadLogList();
+    } else if (window.loadLogList) {
+        window.loadLogList();
+    }
+};
+
+/**
  * Cancel batch storage operation
  */
-window.cancelBatchStorage = function() {
+window.cancelBatchStorage = function () {
     batchCancelSignal.cancelled = true;
-    const cancelBtn = document.getElementById('parser-batch-cancel-btn');
-    if (cancelBtn) {
-        cancelBtn.disabled = true;
-        cancelBtn.textContent = 'Cancelling...';
-    }
+    // Disable all cancel buttons on progress bars
+    progressBars.forEach((barData) => {
+        if (barData.cancelBtn) {
+            barData.cancelBtn.disabled = true;
+            barData.cancelBtn.textContent = 'Cancelling...';
+        }
+    });
 };
 
 /**
@@ -136,7 +154,8 @@ const progressBars = new Map();
 
 // Define the order in which progress bars should appear
 const PROGRESS_BAR_ORDER = [
-    'reading',
+    'processing',
+    'storing_asset_imports',
     'receiving_asset_imports',
     'receiving_log_lines',
     'storing_log_lines_indexeddb'
@@ -149,50 +168,61 @@ function getProgressBar(phaseId, phaseLabel) {
     if (progressBars.has(phaseId)) {
         return progressBars.get(phaseId);
     }
-    
+
     const container = document.getElementById('parser-progress-bars-container');
     if (!container) return null;
-    
-    // Create progress bar HTML - compact layout with name on left, bar on right
+
+    // Create progress bar HTML - match dashboard log-lines-progress-bar styling exactly (single row: label, bar, percentage)
     const barContainer = document.createElement('div');
     barContainer.id = `progress-bar-${phaseId}`;
-    barContainer.style.cssText = 'margin-bottom: 8px; padding: 8px 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e0e0e0; display: flex; align-items: center; gap: 12px;';
-    
-    // Left side: label
-    const labelDiv = document.createElement('div');
-    labelDiv.style.cssText = 'font-weight: 500; color: #333; min-width: 200px; font-size: 0.9em;';
+    barContainer.style.cssText = 'margin-bottom: 15px; width: 100%;';
+
+    // Single row: label, progress bar, percentage - match dashboard exactly
+    const row = document.createElement('div');
+    row.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-bottom: 5px;';
+
+    // Label (phase name) on the left
+    const labelDiv = document.createElement('span');
+    labelDiv.style.cssText = 'font-size: 0.85em; color: #666; white-space: nowrap;';
     labelDiv.textContent = phaseLabel;
-    
-    // Right side: progress bar and info
-    const rightSide = document.createElement('div');
-    rightSide.style.cssText = 'flex: 1; display: flex; flex-direction: column; gap: 4px;';
-    
-    const timeDiv = document.createElement('div');
-    timeDiv.id = `progress-time-${phaseId}`;
-    timeDiv.style.cssText = 'font-size: 0.8em; color: #666; text-align: right;';
-    timeDiv.textContent = 'Calculating...';
-    
+
+    // Progress bar wrapper - thin bar (4px height) matching dashboard exactly
     const barWrapper = document.createElement('div');
-    barWrapper.style.cssText = 'width: 100%; height: 20px; background-color: #e0e0e0; border-radius: 10px; overflow: hidden; position: relative;';
-    
+    barWrapper.style.cssText = 'flex: 1; height: 4px; background-color: #e0e0e0; border-radius: 2px; overflow: hidden; position: relative;';
+
     const progressBar = document.createElement('div');
     progressBar.id = `progress-bar-fill-${phaseId}`;
-    progressBar.style.cssText = 'height: 100%; background-color: #4CAF50; width: 0%; transition: width 0.3s ease; border-radius: 10px;';
-    
-    const progressText = document.createElement('div');
-    progressText.id = `progress-text-${phaseId}`;
-    progressText.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.75em; font-weight: bold; color: #333; text-shadow: 0 0 2px white;';
-    progressText.textContent = '0%';
-    
+    progressBar.style.cssText = 'height: 100%; background-color: #4CAF50; width: 0%; transition: width 0.3s ease;';
+
     barWrapper.appendChild(progressBar);
-    barWrapper.appendChild(progressText);
-    
-    rightSide.appendChild(timeDiv);
-    rightSide.appendChild(barWrapper);
-    
-    barContainer.appendChild(labelDiv);
-    barContainer.appendChild(rightSide);
-    
+
+    // Percentage text on the right
+    const progressText = document.createElement('span');
+    progressText.id = `progress-text-${phaseId}`;
+    progressText.style.cssText = 'font-size: 0.85em; color: #666; white-space: nowrap; min-width: 80px; text-align: right;';
+    progressText.textContent = '0%';
+
+    // Cancel button on the right (only shown for active progress bars)
+    const cancelBtn = document.createElement('button');
+    cancelBtn.id = `progress-cancel-${phaseId}`;
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = cancelBatchStorage;
+    cancelBtn.style.cssText = 'display: none; padding: 4px 12px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: grab; font-size: 0.8em; white-space: nowrap; margin-left: 10px;';
+
+    // Time remaining (optional, shown below the bar if available)
+    const timeDiv = document.createElement('div');
+    timeDiv.id = `progress-time-${phaseId}`;
+    timeDiv.style.cssText = 'font-size: 0.75em; color: #999; margin-top: 2px; display: none;';
+    timeDiv.textContent = '';
+
+    row.appendChild(labelDiv);
+    row.appendChild(barWrapper);
+    row.appendChild(progressText);
+    row.appendChild(cancelBtn);
+
+    barContainer.appendChild(row);
+    barContainer.appendChild(timeDiv);
+
     // Insert in the correct order based on PROGRESS_BAR_ORDER
     const orderIndex = PROGRESS_BAR_ORDER.indexOf(phaseId);
     if (orderIndex === -1) {
@@ -215,18 +245,18 @@ function getProgressBar(phaseId, phaseLabel) {
             container.appendChild(barContainer);
         }
     }
-    
+
     const barData = {
         container: barContainer,
         label: labelDiv,
         time: timeDiv,
         bar: progressBar,
         text: progressText,
+        cancelBtn: cancelBtn,
         phaseId: phaseId,
-        phaseLabel: phaseLabel,
-        rightSide: rightSide
+        phaseLabel: phaseLabel
     };
-    
+
     progressBars.set(phaseId, barData);
     return barData;
 }
@@ -237,13 +267,33 @@ function getProgressBar(phaseId, phaseLabel) {
 function updateProgressBar(phaseId, phaseLabel, percent, estimatedTimeRemaining) {
     const barData = getProgressBar(phaseId, phaseLabel);
     if (!barData) return;
-    
+
     // Update progress bar
     barData.bar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
     barData.text.textContent = `${percent.toFixed(1)}%`;
-    
-    // Update time remaining
-    barData.time.textContent = estimatedTimeRemaining !== null ? formatTimeRemaining(estimatedTimeRemaining) : 'Calculating...';
+
+    // Show cancel button for active progress bars (not complete)
+    if (percent > 0 && percent < 100) {
+        // Hide cancel button on all other progress bars
+        progressBars.forEach((otherBar, otherPhaseId) => {
+            if (otherBar.cancelBtn && otherPhaseId !== phaseId) {
+                otherBar.cancelBtn.style.display = 'none';
+            }
+        });
+        // Show cancel button on this progress bar
+        if (barData.cancelBtn) {
+            barData.cancelBtn.style.display = 'inline-block';
+        }
+    }
+
+    // Update time remaining - show below the bar if available
+    if (estimatedTimeRemaining !== null && estimatedTimeRemaining >= 0) {
+        barData.time.textContent = `Estimated time remaining: ${formatTimeRemaining(estimatedTimeRemaining)}`;
+        barData.time.style.display = 'block';
+    } else {
+        barData.time.textContent = '';
+        barData.time.style.display = 'none';
+    }
 }
 
 /**
@@ -252,11 +302,33 @@ function updateProgressBar(phaseId, phaseLabel, percent, estimatedTimeRemaining)
 function completeProgressBar(phaseId) {
     const barData = progressBars.get(phaseId);
     if (!barData) return;
-    
+
     barData.bar.style.width = '100%';
     barData.text.textContent = '100%';
-    barData.time.textContent = 'Complete';
+    barData.time.textContent = '';
+    barData.time.style.display = 'none';
     barData.bar.style.backgroundColor = '#4CAF50';
+
+    // Hide cancel button on this completed progress bar
+    if (barData.cancelBtn) {
+        barData.cancelBtn.style.display = 'none';
+    }
+
+    // Move cancel button to next active progress bar if any
+    const orderIndex = PROGRESS_BAR_ORDER.indexOf(phaseId);
+    if (orderIndex >= 0) {
+        for (let i = orderIndex + 1; i < PROGRESS_BAR_ORDER.length; i++) {
+            const nextPhaseId = PROGRESS_BAR_ORDER[i];
+            const nextBar = progressBars.get(nextPhaseId);
+            if (nextBar) {
+                const nextPercent = parseFloat(nextBar.text.textContent) || 0;
+                if (nextPercent > 0 && nextPercent < 100 && nextBar.cancelBtn) {
+                    nextBar.cancelBtn.style.display = 'inline-block';
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -271,74 +343,92 @@ function clearProgressBars() {
 }
 
 /**
- * Show cancel button
+ * Show cancel button (deprecated - cancel buttons are now on progress bars)
  */
 function showCancelButton() {
-    const cancelBtn = document.getElementById('parser-batch-cancel-btn');
-    if (cancelBtn) {
-        cancelBtn.style.display = 'inline-block';
-    }
+    // Cancel buttons are now managed per progress bar
 }
 
 /**
- * Hide cancel button
+ * Hide cancel button (deprecated - cancel buttons are now on progress bars)
  */
 function hideCancelButton() {
-    const cancelBtn = document.getElementById('parser-batch-cancel-btn');
-    if (cancelBtn) {
-        cancelBtn.style.display = 'none';
-    }
+    // Hide all cancel buttons on progress bars
+    progressBars.forEach((barData) => {
+        if (barData.cancelBtn) {
+            barData.cancelBtn.style.display = 'none';
+        }
+    });
 }
+
+/**
+ * Toggle parser output visibility
+ */
+window.toggleParserOutput = function () {
+    const outputDiv = document.getElementById('parser-loading-progress');
+    const toggleBtn = document.getElementById('parser-output-toggle-btn');
+
+    if (!outputDiv || !toggleBtn) return;
+
+    if (outputDiv.style.display === 'none' || !outputDiv.style.display) {
+        outputDiv.style.display = 'block';
+        toggleBtn.textContent = 'Hide output';
+    } else {
+        outputDiv.style.display = 'none';
+        toggleBtn.textContent = 'Show output';
+    }
+};
 
 /**
  * Reset parser to initial state
  */
-window.resetParser = function() {
-    console.log('[Parser] Resetting parser - terminating any background workers...');
-    
+window.resetParser = function () {
+
     // Terminate any background workers when starting a new parse
-    if (window.logLinesWorker) {
-        console.log('[Parser] Terminating existing Web Worker...');
-        window.logLinesWorker.terminate();
-        window.logLinesWorker = null;
-    }
-    
-    // Clear worker progress state
-    localStorage.removeItem('log_lines_worker_progress');
-    
+
     // Hide completion container
     const completionContainer = document.getElementById('parser-completion-container');
     if (completionContainer) {
         completionContainer.style.display = 'none';
     }
-    
+
     // Hide progress container
     const progressContainer = document.getElementById('parser-progress-container');
     if (progressContainer) {
         progressContainer.style.display = 'none';
     }
-    
+
     // Show upload area
     const uploadArea = document.getElementById('parser-upload-area');
     if (uploadArea) {
         uploadArea.style.display = 'block';
     }
-    
+
+    // Reset output toggle (hide output, reset button text)
+    const outputDiv = document.getElementById('parser-loading-progress');
+    const toggleBtn = document.getElementById('parser-output-toggle-btn');
+    if (outputDiv) {
+        outputDiv.style.display = 'none';
+    }
+    if (toggleBtn) {
+        toggleBtn.textContent = 'Show output';
+    }
+
     // Clear progress bars
     clearProgressBars();
-    
+
     // Clear file input
     const fileInput = document.getElementById('parser-file-input');
     if (fileInput) {
         fileInput.value = '';
     }
-    
+
     // Reset cancel signal
     batchCancelSignal.cancelled = false;
-    
+
     // Hide cancel button
     hideCancelButton();
-    
+
     // Hide error
     hideError();
 };
@@ -367,7 +457,7 @@ function showCompletionButton(showBackgroundMessage = false) {
 function updateStorageProgress(message) {
     const progressDiv = document.getElementById('parser-loading-progress');
     if (!progressDiv) return;
-    
+
     // Append to progress (add new line)
     const currentText = progressDiv.textContent;
     if (currentText) {
@@ -375,10 +465,10 @@ function updateStorageProgress(message) {
     } else {
         progressDiv.textContent = message;
     }
-    
+
     // Scroll to bottom
     progressDiv.scrollTop = progressDiv.scrollHeight;
-    
+
     // Don't log to console - messages should only appear in parser logs
 }
 
@@ -412,21 +502,23 @@ async function storeParsedDataInIndexedDB(logId) {
     try {
         // Reset cancel signal at start
         batchCancelSignal.cancelled = false;
-        
+
+        // Terminate any existing background workers from previous parses
+
         // Show progress container
         const progressContainer = document.getElementById('parser-progress-container');
         const uploadArea = document.getElementById('parser-upload-area');
         if (progressContainer) progressContainer.style.display = 'block';
         if (uploadArea) uploadArea.style.display = 'none';
-        
+
         updateStorageProgress('Fetching parsed data from server...');
-        
+
         // Track receiving progress
         let totalReceived = {
             asset_imports: 0,
             log_lines: 0
         };
-        
+
         // Track receiving progress for each phase
         const receivingStates = {
             receiving_asset_imports: {
@@ -448,27 +540,27 @@ async function storeParsedDataInIndexedDB(logId) {
                 phaseLabel: 'Receiving log lines'
             }
         };
-        
+
         // Helper to update receiving progress
         function updateReceivingProgress(phaseKey, received, total, currentTime) {
             const state = receivingStates[phaseKey];
             if (!state) return;
-            
+
             // Update total if provided (especially for log_lines from metadata)
             if (total !== null && total > 0) {
                 state.totalItems = total;
             }
-            
+
             state.receivedItems = received;
-            
+
             // For receiving log lines, batches are 5000 lines each
             const LINES_PER_BATCH = 5000;
-            
+
             // Add avgBatchTime to state if not present
             if (!state.hasOwnProperty('avgBatchTime')) {
                 state.avgBatchTime = null;
             }
-            
+
             if (state.lastBatchTime === null) {
                 state.lastBatchTime = currentTime;
                 const percent = state.totalItems > 0 ? (received / state.totalItems) * 100 : 0;
@@ -477,14 +569,14 @@ async function storeParsedDataInIndexedDB(logId) {
                 // Calculate time for this batch (5000 lines)
                 const batchTime = currentTime - state.lastBatchTime;
                 state.batchTimes.push(batchTime);
-                
+
                 // Keep only the last 3 batch times (15K lines total)
                 if (state.batchTimes.length > 3) {
                     state.batchTimes.shift();
                 }
-                
+
                 state.lastBatchTime = currentTime;
-                
+
                 // Calculate avgBatchTime once after we have 3 batches AND received at least 15000 lines
                 // This ensures we have meaningful timing data
                 if (state.avgBatchTime === null && state.batchTimes.length >= 3 && received >= 15000) {
@@ -495,83 +587,81 @@ async function storeParsedDataInIndexedDB(logId) {
                         state.avgBatchTime = avg;
                     }
                 }
-                
+
                 // Calculate estimated time remaining
                 let estimatedTimeRemaining = null;
                 if (state.avgBatchTime !== null && state.avgBatchTime > 0 && state.totalItems > 0) {
                     // total batches needed = total line count / lines per batch (5K)
                     const totalBatches = Math.ceil(state.totalItems / LINES_PER_BATCH);
-                    
+
                     // batches received = received lines / lines per batch
                     const batchesReceived = Math.floor(received / LINES_PER_BATCH);
-                    
+
                     // batches remaining = total batches - batches received
                     const batchesRemaining = totalBatches - batchesReceived;
-                    
+
                     // time remaining = batches remaining * avgBatchTime
                     estimatedTimeRemaining = (batchesRemaining * state.avgBatchTime) / 1000; // Convert to seconds
                 }
-                
+
                 const percent = state.totalItems > 0 ? (received / state.totalItems) * 100 : 0;
                 updateProgressBar(state.phaseId, state.phaseLabel, percent, estimatedTimeRemaining);
             }
         }
-        
+
         // Fetch exported data from server (streaming for large files)
         const response = await fetch(`/api/log/${logId}/export`);
         if (!response.ok) {
             throw new Error(`Failed to export data: ${response.statusText}`);
         }
-        
+
         // Parse streaming JSON response (newline-delimited JSON)
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        
+
         // Accumulate data by type
         const data = {
             metadata: null,
             asset_imports: [],
             pipeline_refreshes: [],
-            domain_reload_steps: [],
             script_compilation: [],
-            telemetry_data: [],
             operations: [],
             log_lines: []
         };
-        
+
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            
+
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop(); // Keep incomplete line in buffer
-            
+
             for (const line of lines) {
                 if (!line.trim()) continue;
-                
+
                 try {
                     const chunk = JSON.parse(line);
-                    
+
                     if (chunk.type === 'metadata') {
                         data.metadata = chunk.data;
                         updateStorageProgress('Received metadata...');
-                        
+
                         // Set total log lines from metadata if available
                         if (chunk.data && chunk.data.total_lines) {
                             const totalLogLines = chunk.data.total_lines;
                             receivingStates.receiving_log_lines.totalItems = totalLogLines;
                             // Initialize progress bar with correct total
-                            updateProgressBar(receivingStates.receiving_log_lines.phaseId, 
-                                            receivingStates.receiving_log_lines.phaseLabel, 
-                                            0, null);
+                            updateProgressBar(receivingStates.receiving_log_lines.phaseId,
+                                receivingStates.receiving_log_lines.phaseLabel,
+                                0, null);
                         }
                     } else if (chunk.type === 'asset_imports') {
                         const currentTime = performance.now();
                         data.asset_imports.push(...chunk.data);
                         totalReceived.asset_imports = data.asset_imports.length;
-                        
+
                         // Update receiving progress (we don't know total yet, so estimate)
                         const state = receivingStates.receiving_asset_imports;
                         if (state.totalItems === null) {
@@ -579,20 +669,16 @@ async function storeParsedDataInIndexedDB(logId) {
                             state.totalItems = Math.max(totalReceived.asset_imports * 2, 10000);
                         }
                         updateReceivingProgress('receiving_asset_imports', totalReceived.asset_imports, state.totalItems, currentTime);
-                        
+
                         updateStorageProgress(`Received ${totalReceived.asset_imports.toLocaleString()} asset imports...`);
                     } else if (chunk.type === 'pipeline_refreshes') {
                         data.pipeline_refreshes = chunk.data;
                         updateStorageProgress(`Received ${data.pipeline_refreshes.length} pipeline refreshes...`);
-                    } else if (chunk.type === 'domain_reload_steps') {
-                        data.domain_reload_steps = chunk.data;
-                        updateStorageProgress(`Received ${data.domain_reload_steps.length} domain reload steps...`);
+
                     } else if (chunk.type === 'script_compilation') {
                         data.script_compilation = chunk.data;
                         updateStorageProgress(`Received ${data.script_compilation.length} script compilation records...`);
-                    } else if (chunk.type === 'telemetry_data') {
-                        data.telemetry_data = chunk.data;
-                        updateStorageProgress(`Received ${data.telemetry_data.length} telemetry records...`);
+
                     } else if (chunk.type === 'operations') {
                         data.operations = chunk.data;
                         updateStorageProgress(`Received ${data.operations.length} operations...`);
@@ -600,7 +686,7 @@ async function storeParsedDataInIndexedDB(logId) {
                         const currentTime = performance.now();
                         data.log_lines.push(...chunk.data);
                         totalReceived.log_lines = data.log_lines.length;
-                        
+
                         // Update receiving progress - use total from metadata if available
                         const state = receivingStates.receiving_log_lines;
                         if (state.totalItems === null) {
@@ -608,7 +694,7 @@ async function storeParsedDataInIndexedDB(logId) {
                             state.totalItems = Math.max(totalReceived.log_lines * 2, 10000);
                         }
                         updateReceivingProgress('receiving_log_lines', totalReceived.log_lines, state.totalItems, currentTime);
-                        
+
                         updateStorageProgress(`Received ${totalReceived.log_lines.toLocaleString()} log lines...`);
                     } else if (chunk.type === 'complete') {
                         updateStorageProgress('All data received from server');
@@ -622,7 +708,7 @@ async function storeParsedDataInIndexedDB(logId) {
                 }
             }
         }
-        
+
         // Parse any remaining buffer
         if (buffer.trim()) {
             try {
@@ -638,41 +724,52 @@ async function storeParsedDataInIndexedDB(logId) {
                 console.error('Error parsing final buffer:', parseError);
             }
         }
-        
+
         updateStorageProgress('Creating new IndexedDB database...');
-        
+
         // Create new database for this parse
         const db = await createNewDatabase();
         await db.open();
-        
+
         // Store metadata (remove id to let IndexedDB auto-generate)
         const metadata = { ...data.metadata };
         delete metadata.id;
         metadata.date_parsed = metadata.date_parsed || new Date().toISOString();
         const newLogId = await db.insertLogMetadata(metadata);
-        
+
         updateStorageProgress('Storing metadata...');
         let dbSizeMB = await db.getDatabaseSizeMB();
         updateStorageProgress(`Metadata stored (${data.asset_imports.length} assets, ${data.log_lines.length} log lines) (Database size: ${dbSizeMB.toFixed(2)} MB)`);
-        
-        // Store all data with the new log ID
+
+        // Store all data
         const assetImports = data.asset_imports.map(ai => {
             const item = { ...ai };
             delete item.id;
-            item.log_id = newLogId;
             return item;
         });
         if (assetImports.length > 0) {
             updateStorageProgress(`Storing ${assetImports.length} asset imports...`);
-            await db.bulkInsertAssetImports(assetImports);
+            updateProgressBar('storing_asset_imports', 'Filling Database', 0, null);
+
+            // Progress callback for asset import storage
+            let lastReportedPercent = 0;
+            const assetProgressCallback = (batchNum, totalBatches, processed, total, percent, estimatedTimeRemaining) => {
+                // Only update UI every 2%
+                if (percent - lastReportedPercent >= 2 || percent === 100) {
+                    updateProgressBar('storing_asset_imports', 'Filling Database', percent, estimatedTimeRemaining);
+                    lastReportedPercent = percent;
+                }
+            };
+
+            await db.bulkInsertAssetImports(assetImports, assetProgressCallback, batchCancelSignal);
+            completeProgressBar('storing_asset_imports');
             dbSizeMB = await db.getDatabaseSizeMB();
-            updateStorageProgress(`Asset imports stored (Database size: ${dbSizeMB.toFixed(2)} MB)`);
+            updateStorageProgress(`✓ Asset imports stored (Database size: ${dbSizeMB.toFixed(2)} MB)`);
         }
-        
+
         const pipelineRefreshes = data.pipeline_refreshes.map(pr => {
             const item = { ...pr };
             delete item.id;
-            item.log_id = newLogId;
             return item;
         });
         if (pipelineRefreshes.length > 0) {
@@ -681,24 +778,12 @@ async function storeParsedDataInIndexedDB(logId) {
             dbSizeMB = await db.getDatabaseSizeMB();
             updateStorageProgress(`Pipeline refreshes stored (Database size: ${dbSizeMB.toFixed(2)} MB)`);
         }
-        
-        const domainReloadSteps = data.domain_reload_steps.map(dr => {
-            const item = { ...dr };
-            delete item.id;
-            item.log_id = newLogId;
-            return item;
-        });
-        if (domainReloadSteps.length > 0) {
-            updateStorageProgress(`Storing ${domainReloadSteps.length} domain reload steps...`);
-            await db.bulkInsertDomainReloadSteps(domainReloadSteps);
-            dbSizeMB = await db.getDatabaseSizeMB();
-            updateStorageProgress(`Domain reload steps stored (Database size: ${dbSizeMB.toFixed(2)} MB)`);
-        }
-        
+
+
+
         const scriptCompilation = data.script_compilation.map(sc => {
             const item = { ...sc };
             delete item.id;
-            item.log_id = newLogId;
             return item;
         });
         if (scriptCompilation.length > 0) {
@@ -707,24 +792,12 @@ async function storeParsedDataInIndexedDB(logId) {
             dbSizeMB = await db.getDatabaseSizeMB();
             updateStorageProgress(`Script compilation stored (Database size: ${dbSizeMB.toFixed(2)} MB)`);
         }
-        
-        const telemetryData = data.telemetry_data.map(td => {
-            const item = { ...td };
-            delete item.id;
-            item.log_id = newLogId;
-            return item;
-        });
-        if (telemetryData.length > 0) {
-            updateStorageProgress(`Storing ${telemetryData.length} telemetry records...`);
-            await db.bulkInsertTelemetryData(telemetryData);
-            dbSizeMB = await db.getDatabaseSizeMB();
-            updateStorageProgress(`Telemetry data stored (Database size: ${dbSizeMB.toFixed(2)} MB)`);
-        }
-        
+
+
+
         const operations = data.operations.map(op => {
             const item = { ...op };
             delete item.id;
-            item.log_id = newLogId;
             return item;
         });
         if (operations.length > 0) {
@@ -733,26 +806,18 @@ async function storeParsedDataInIndexedDB(logId) {
             dbSizeMB = await db.getDatabaseSizeMB();
             updateStorageProgress(`Operations stored (Database size: ${dbSizeMB.toFixed(2)} MB)`);
         }
-        
-        // Prepare log lines for background worker (but don't store them yet)
-        const logLines = data.log_lines.map(ll => {
-            const item = { ...ll };
-            delete item.id;
-            item.log_id = newLogId;
-            // Convert boolean fields
-            item.is_error = item.is_error ? 1 : 0;
-            item.is_warning = item.is_warning ? 1 : 0;
-            return item;
-        });
-        
+
+        // Log lines are no longer stored - we use file-based reading with line index
+        // The line index was already stored during parsing
+
         // Get database size before closing
         dbSizeMB = await db.getDatabaseSizeMB();
         await db.close();
-        
+
         // Update current log ID to the new one
         setCurrentLogId(newLogId);
         window.apiClient.setCurrentLogId(newLogId);
-        
+
         // Force API client to refresh its database connection to use the new database
         // Clear the cached database instance so it will get the new one
         if (window.apiClient && window.apiClient.db) {
@@ -763,188 +828,21 @@ async function storeParsedDataInIndexedDB(logId) {
             }
             window.apiClient.db = null; // Clear cache to force refresh
         }
-        
-        // If we have log lines, start background worker to store them
-        if (logLines.length > 0) {
-            updateStorageProgress(`Starting background storage of ${logLines.length} log lines...`);
-            
-            // Store progress state in localStorage for dashboard access
-            const progressState = {
-                logId: newLogId,
-                totalLines: logLines.length,
-                processedLines: 0,
-                percent: 0,
-                estimatedTimeRemaining: null,
-                status: 'in_progress',
-                startTime: Date.now()
-            };
-            localStorage.setItem('log_lines_worker_progress', JSON.stringify(progressState));
-            
-            // Start Web Worker for background insertion
-            console.log('[Parser] Creating Web Worker...');
-            const worker = new Worker('static/js/log-lines-worker.js');
-            
-            // Handle worker errors
-            worker.onerror = (error) => {
-                console.error('[Parser] Worker error:', error);
-                updateStorageProgress(`✗ Worker error: ${error.message}`);
-            };
-            
-            // Initialize worker with database version
-            console.log('[Parser] Initializing worker with version:', db.version);
-            worker.postMessage({
-                type: 'init',
-                data: {
-                    version: db.version
-                }
-            });
-            
-            // Wait for worker to be ready (this is the only await - necessary for initialization)
-            console.log('[Parser] Waiting for worker to initialize...');
-            await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    console.error('[Parser] Worker initialization timeout - continuing anyway');
-                    resolve(); // Continue even if timeout - worker might still work
-                }, 5000); // Reduced to 5 second timeout
-                
-                worker.addEventListener('message', function readyHandler(e) {
-                    if (e.data.type === 'ready') {
-                        clearTimeout(timeout);
-                        worker.removeEventListener('message', readyHandler);
-                        console.log('[Parser] Worker ready!');
-                        resolve();
-                    }
-                });
-            });
-            
-            // Send log lines to worker (this is non-blocking - worker processes in background)
-            console.log('[Parser] Sending log lines to worker:', logLines.length, 'lines');
-            console.log('[Parser] Worker will process in background - continuing immediately (NOT waiting for completion)...');
-            worker.postMessage({
-                type: 'insert',
-                data: {
-                    logLines: logLines,
-                    logId: newLogId
-                }
-            });
-            
-            // IMPORTANT: We do NOT await the worker completion - it processes in the background
-            // Execution continues immediately to the next line
-            console.log('[Parser] Worker message sent - execution continues immediately');
-            
-            // Handle worker messages (asynchronous - doesn't block)
-            worker.addEventListener('message', (e) => {
-                const { type, batchNum, totalBatches, processed, total, percent, estimatedTimeRemaining, totalTime, totalLines, verifiedCount, error } = e.data;
-                
-                console.log('[Parser] Worker message:', type, { batchNum, processed, total, percent });
-                
-                if (type === 'progress') {
-                    // Update progress state
-                    const progressState = {
-                        logId: newLogId,
-                        totalLines: total,
-                        processedLines: processed,
-                        percent: percent,
-                        estimatedTimeRemaining: estimatedTimeRemaining,
-                        status: 'in_progress',
-                        startTime: JSON.parse(localStorage.getItem('log_lines_worker_progress') || '{}').startTime || Date.now()
-                    };
-                    localStorage.setItem('log_lines_worker_progress', JSON.stringify(progressState));
-                } else if (type === 'complete') {
-                    console.log('[Parser] Worker completed!', { totalTime, totalLines, verifiedCount });
-                    // Mark as complete
-                    const progressState = {
-                        logId: newLogId,
-                        totalLines: totalLines,
-                        processedLines: totalLines,
-                        percent: 100,
-                        estimatedTimeRemaining: 0,
-                        status: 'complete',
-                        startTime: JSON.parse(localStorage.getItem('log_lines_worker_progress') || '{}').startTime || Date.now(),
-                        totalTime: totalTime,
-                        verifiedCount: verifiedCount
-                    };
-                    localStorage.setItem('log_lines_worker_progress', JSON.stringify(progressState));
-                    
-                    // Clean up worker
-                    worker.terminate();
-                    console.log('[Parser] Worker terminated');
-                } else if (type === 'error') {
-                    console.error('[Parser] Worker error:', error);
-                    // Handle error
-                    const progressState = {
-                        logId: newLogId,
-                        status: 'error',
-                        error: error
-                    };
-                    localStorage.setItem('log_lines_worker_progress', JSON.stringify(progressState));
-                    
-                    updateStorageProgress(`✗ Error storing log lines: ${error}`);
-                    worker.terminate();
-                }
-            });
-            
-            // Store worker reference for cancellation (if needed)
-            window.logLinesWorker = worker;
-        } else {
-            // No log lines, mark as complete
-            localStorage.setItem('log_lines_worker_progress', JSON.stringify({
-                logId: newLogId,
-                status: 'complete'
-            }));
-        }
-        
+
+        // No longer need to store log lines - they're read from file on demand using line index
+        // Mark progress as complete (no worker needed)
+
         // Final completion message
         updateStorageProgress(`✓ Storage complete! Database: ${db.dbName} (Size: ${dbSizeMB.toFixed(2)} MB)`);
-        if (logLines.length > 0) {
-            updateStorageProgress(`✓ Log lines (${logLines.length}) are being stored in the background by Web Worker.`);
-            updateStorageProgress(`✓ Closing overlay and returning to dashboard...`);
-        } else {
-            updateStorageProgress('✓ Parsing complete!');
-        }
-        
+        updateStorageProgress('✓ Parsing complete! Log lines are read from file on demand.');
+
         // Output final size to console
-        console.log(`========================================`);
-        console.log(`IndexedDB Storage Complete`);
-        console.log(`Database: ${db.dbName}`);
-        console.log(`Log ID: ${newLogId}`);
-        console.log(`Database Size: ${dbSizeMB.toFixed(2)} MB`);
-        if (logLines.length > 0) {
-            console.log(`Log lines (${logLines.length}) are being stored in background by Web Worker`);
-            console.log(`[Parser] NOT waiting for worker - returning to dashboard immediately`);
-        }
-        console.log(`========================================`);
-        
-        // Automatically close overlay and return to dashboard after a short delay
+
+        // Automatically close overlay after a short delay
         // The worker will continue processing log lines in the background
+        // Dashboard refresh will happen when user clicks "Close & Refresh Dashboard" button
         setTimeout(() => {
-            console.log('[Parser] Closing overlay and refreshing dashboard...');
             closeLogParser(); // This keeps the worker alive
-            
-            // Force API client to refresh database connection to ensure it uses the new database
-            if (window.apiClient) {
-                if (window.apiClient.db) {
-                    window.apiClient.db.close().catch(() => {}); // Close old connection
-                }
-                window.apiClient.db = null; // Clear cache to force fresh connection
-                // Also clear any cached version info
-                if (window.getCurrentDbVersion) {
-                    // Force refresh by clearing any cached version
-                    console.log('[Parser] Forcing database connection refresh');
-                }
-            }
-            
-            // Clear dashboard content first to prevent showing stale data
-            if (window.clearDashboard) {
-                window.clearDashboard();
-            }
-            
-            // Refresh the dashboard to show the new log
-            if (typeof loadLogList === 'function') {
-                loadLogList();
-            } else if (window.loadLogList) {
-                window.loadLogList();
-            }
         }, 2000);
     } catch (error) {
         console.error('Error storing data in IndexedDB:', error);
@@ -958,9 +856,14 @@ async function storeParsedDataInIndexedDB(logId) {
  * Handle file selection - now uses client-side parser
  */
 async function handleFileSelect(event) {
-    const file = event.target.files[0];
+    let file = event.target.files ? event.target.files[0] : null;
+
     if (!file) return;
-    
+
+    // Clear any file handle/path (no longer using File System Access API)
+    window.currentFileHandle = null;
+    window.currentFilePath = null;
+
     // Show progress container
     const progressContainer = document.getElementById('parser-progress-container');
     const uploadArea = document.getElementById('parser-upload-area');
@@ -968,24 +871,27 @@ async function handleFileSelect(event) {
     if (uploadArea) uploadArea.style.display = 'none';
     hideError();
     hideCancelButton();
-    
+
     // Clear previous progress
     clearProgressBars();
     const progressDiv = document.getElementById('parser-loading-progress');
     if (progressDiv) progressDiv.textContent = '';
-    
+
     // Reset cancel signal
     batchCancelSignal.cancelled = false;
-    
+
     try {
         // Create new database
         updateStorageProgress('Creating new IndexedDB database...');
         const db = await createNewDatabase();
         await db.open();
-        
-        // Initialize reading progress bar at the start
-        updateProgressBar('reading', 'Reading log file', 0, null);
-        
+
+        // Initialize processing progress bar at the start
+        updateProgressBar('processing', 'Processing log file', 0, null);
+
+        // Track processing state for time estimation
+        let processingStartTime = null;
+
         // Create parser instance
         const progressCallback = (message) => {
             // Check if this is a reading progress message (don't add to log, just update progress bar)
@@ -993,180 +899,153 @@ async function handleFileSelect(event) {
             if (readingMatch) {
                 const percent = parseFloat(readingMatch[1]);
                 const linesRead = parseInt(readingMatch[2].replace(/,/g, ''), 10);
-                
+
                 // Calculate estimated time remaining
-                // We'll use a simple approach: track start time and estimate based on progress
                 if (!window.readingStartTime) {
                     window.readingStartTime = Date.now();
+                    processingStartTime = Date.now();
                 }
-                
+
                 let estimatedTimeRemaining = null;
                 if (percent > 0) {
                     const elapsed = (Date.now() - window.readingStartTime) / 1000; // seconds
                     const totalTime = (elapsed / percent) * 100;
                     estimatedTimeRemaining = Math.max(0, totalTime - elapsed);
                 }
-                
-                updateProgressBar('reading', 'Reading log file', percent, estimatedTimeRemaining);
+
+                updateProgressBar('processing', 'Processing log file', percent, estimatedTimeRemaining);
                 // Don't add reading progress messages to the log
                 return;
             }
-            
+
             // Also check for initial reading message
             if (message.includes('Reading log file') && !message.includes('Reading:')) {
-                updateProgressBar('reading', 'Reading log file', 0, null);
+                updateProgressBar('processing', 'Processing log file', 0, null);
+                processingStartTime = Date.now();
                 // Don't add initial reading message to log either
                 return;
             }
-            
-            // Filter out "Extracting metadata from header..." message (part of reading phase)
+
+            // Filter out "Extracting metadata from header..." message (part of processing phase)
             if (message.includes('Extracting metadata from header')) {
                 // Don't add to log
                 return;
             }
-            
+
             // For all other messages, add to log
             updateStorageProgress(message);
+
+            // Update processing progress based on "Processed X lines" messages
+            const processedMatch = message.match(/Processed\s+(\d+)\s+lines/i);
+            if (processedMatch) {
+                const processed = parseInt(processedMatch[1], 10);
+
+                // Try to get total from message or estimate
+                const totalLinesMatch = message.match(/Total lines:\s*(\d+)/i);
+                const totalLines = totalLinesMatch ? parseInt(totalLinesMatch[1], 10) : null;
+
+                if (totalLines && processed <= totalLines) {
+                    const percent = (processed / totalLines) * 100;
+
+                    // Calculate estimated time remaining
+                    let estimatedTimeRemaining = null;
+                    if (processingStartTime && percent > 0) {
+                        const elapsed = (Date.now() - processingStartTime) / 1000; // seconds
+                        const totalTime = (elapsed / percent) * 100;
+                        estimatedTimeRemaining = Math.max(0, totalTime - elapsed);
+                    }
+
+                    updateProgressBar('processing', 'Processing log file', percent, estimatedTimeRemaining);
+                } else if (!totalLines && processed > 0) {
+                    // If we don't have total yet, show minimal progress (just to indicate activity)
+                    updateProgressBar('processing', 'Processing log file', 1, null);
+                }
+            }
         };
-        
+
         const parser = new UnityLogParser(db, progressCallback);
-        
+
+        // Storage progress callback for database operations
+        const storageProgressCallback = (phaseId, phaseLabel, percent, estimatedTimeRemaining) => {
+            updateProgressBar(phaseId, phaseLabel, percent, estimatedTimeRemaining);
+        };
+
         // Parse the file
         updateStorageProgress('Starting to parse log file...');
         window.readingStartTime = Date.now(); // Track start time for time estimation
-        const { logId, logLines } = await parser.parseLogFile(file, batchCancelSignal);
+
+        const { logId, logLines, assetImports, pipelineRefreshes, operations } = await parser.parseLogFile(file, batchCancelSignal, storageProgressCallback);
+
         window.readingStartTime = null; // Clear after completion
-        
-        // Mark reading as complete
-        completeProgressBar('reading');
-        
-        // Store log lines using the existing worker system
-        if (logLines.length > 0) {
-            updateStorageProgress(`Storing ${logLines.length} log lines in background...`);
-            
-            // Prepare log lines data (minimal structure)
-            const logLinesData = logLines.map(line => ({
-                log_id: line.log_id,
-                line_number: line.line_number,
-                content: line.content,
-                line_type: line.line_type,
-                indent_level: line.indent_level,
-                is_error: line.is_error,
-                is_warning: line.is_warning,
-                timestamp: line.timestamp
-            }));
-            
-            // Store progress state
-            const progressState = {
-                status: 'in_progress',
-                processed: 0,
-                total: logLinesData.length,
-                startTime: Date.now(),
-                lastUpdateTime: Date.now()
-            };
-            localStorage.setItem('log_lines_worker_progress', JSON.stringify(progressState));
-            
-            // Create and start Web Worker
-            const worker = new Worker('static/js/log-lines-worker.js');
-            
-            let workerReady = false;
-            
-            // Set up message handler BEFORE sending init
-            worker.addEventListener('message', (event) => {
-                const message = event.data;
-                const type = message.type;
-                
-                if (type === 'ready') {
-                    workerReady = true;
-                    console.log('[Parser] Worker ready, sending log lines...');
-                    // Worker is ready, send log lines
-                    worker.postMessage({
-                        type: 'insert',
-                        logLines: logLinesData,
-                        logId: logId
-                    });
-                } else if (type === 'progress') {
-                    // Update progress state
-                    const progressData = message.data || message;
-                    const progressState = {
-                        status: 'in_progress',
-                        processed: progressData.processed || 0,
-                        total: progressData.total || logLinesData.length,
-                        percent: progressData.percent || 0,
-                        estimatedTimeRemaining: progressData.estimatedTimeRemaining || null,
-                        startTime: Date.now() - ((progressData.processed || 0) * 100), // Approximate
-                        lastUpdateTime: Date.now()
-                    };
-                    localStorage.setItem('log_lines_worker_progress', JSON.stringify(progressState));
-                } else if (type === 'complete') {
-                    // Mark as complete
-                    const completeData = message.data || message;
-                    const progressState = {
-                        status: 'complete',
-                        processed: completeData.total || logLinesData.length,
-                        total: completeData.total || logLinesData.length,
-                        percent: 100,
-                        estimatedTimeRemaining: 0,
-                        startTime: Date.now(),
-                        lastUpdateTime: Date.now()
-                    };
-                    localStorage.setItem('log_lines_worker_progress', JSON.stringify(progressState));
-                    
-                    console.log('[Parser] Worker completed!', completeData);
-                    
-                    // Don't terminate worker - let it finish naturally
-                } else if (type === 'error') {
-                    const errorMessage = message.data || message.error || 'Unknown error';
-                    console.error('[Parser] Worker error:', errorMessage, message);
-                    showError('Failed to store log lines: ' + errorMessage);
+
+        // Mark processing as complete
+        completeProgressBar('processing');
+
+        // Store asset imports with progress reporting
+        if (assetImports && assetImports.length > 0) {
+            updateStorageProgress(`Storing ${assetImports.length} asset imports...`);
+            updateProgressBar('storing_asset_imports', 'Filling Database', 0, null);
+
+            // Progress callback for asset import storage
+            let lastReportedPercent = 0;
+            const assetProgressCallback = (batchNum, totalBatches, processed, total, percent, estimatedTimeRemaining) => {
+                // Only update UI every 2%
+                if (percent - lastReportedPercent >= 2 || percent === 100) {
+                    updateProgressBar('storing_asset_imports', 'Filling Database', percent, estimatedTimeRemaining);
+                    lastReportedPercent = percent;
                 }
-            });
-            
-            worker.addEventListener('error', (error) => {
-                console.error('[Parser] Worker error event:', error);
-                const errorMsg = error.message || error.filename || 'Unknown worker error';
-                showError('Worker error: ' + errorMsg);
-            });
-            
-            // Now send init message (after handler is set up)
-            console.log('[Parser] Sending init message to worker with version:', db.version);
-            worker.postMessage({
-                type: 'init',
-                version: db.version
-            });
-            
-            // Store worker reference for cancellation
-            window.currentLogLinesWorker = worker;
+            };
+
+            await db.bulkInsertAssetImports(assetImports, assetProgressCallback, batchCancelSignal);
+            completeProgressBar('storing_asset_imports');
+            updateStorageProgress(`✓ Stored ${assetImports.length} asset imports`);
         }
-        
+
+        // Store other data types (these are smaller, so no progress bars needed)
+        if (pipelineRefreshes && pipelineRefreshes.length > 0) {
+            updateStorageProgress(`Storing ${pipelineRefreshes.length} pipeline refreshes...`);
+            await db.bulkInsertPipelineRefreshes(pipelineRefreshes);
+            updateStorageProgress(`✓ Stored ${pipelineRefreshes.length} pipeline refreshes`);
+        }
+
+
+
+        if (operations && operations.length > 0) {
+            updateStorageProgress(`Storing ${operations.length} operations...`);
+            await db.bulkInsertOperations(operations);
+            updateStorageProgress(`✓ Stored ${operations.length} operations`);
+        }
+
+        // Store log lines using the existing worker system
+        // Log lines are no longer stored - they're read from file on demand
+
         // Show completion
         updateStorageProgress('✓ Parsing complete!');
         updateStorageProgress(`✓ Database: ${db.dbName}`);
-        
-        // Automatically close overlay and return to dashboard after a short delay
+
+        // Cancel any active file watching when parsing a new file
+        if (window.liveMonitor) {
+            const activeMonitors = window.liveMonitor.getActiveMonitors();
+            for (const activeLogId of activeMonitors) {
+                await window.liveMonitor.stopMonitoring(activeLogId);
+            }
+        }
+
+        // Clear file handle and path
+        window.currentFileHandle = null;
+        window.currentFilePath = null;
+
+        // Final dashboard update after parsing completes
+        if (typeof loadOverview === 'function') {
+            loadOverview(false); // Full update after completion
+        }
+
+        // Automatically close overlay after a short delay
+        // Dashboard refresh will happen when user clicks "Close & Refresh Dashboard" button
         setTimeout(() => {
-            console.log('[Parser] Closing overlay and refreshing dashboard...');
             closeLogParser(); // This keeps the worker alive
-            
-            // Force API client to refresh database connection
-            if (window.apiClient && window.apiClient.db) {
-                window.apiClient.db.close().catch(() => {});
-                window.apiClient.db = null;
-            }
-            
-            // Clear dashboard content first
-            if (window.clearDashboard) {
-                window.clearDashboard();
-            }
-            
-            // Refresh the dashboard
-            if (typeof loadLogList === 'function') {
-                loadLogList();
-            } else if (window.loadLogList) {
-                window.loadLogList();
-            }
         }, 2000);
-        
+
     } catch (error) {
         console.error('Error parsing log file:', error);
         if (error.message === 'Parsing cancelled') {
@@ -1184,7 +1063,7 @@ function initializeParserFileInput() {
         fileInput.setAttribute('data-initialized', 'true');
         fileInput.addEventListener('change', handleFileSelect);
     }
-    
+
     // Drag and drop support
     const uploadArea = document.getElementById('parser-upload-area');
     if (uploadArea) {
@@ -1192,11 +1071,11 @@ function initializeParserFileInput() {
             e.preventDefault();
             uploadArea.classList.add('dragover');
         });
-        
+
         uploadArea.addEventListener('dragleave', () => {
             uploadArea.classList.remove('dragover');
         });
-        
+
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
             uploadArea.classList.remove('dragover');
@@ -1214,7 +1093,7 @@ function initializeParserFileInput() {
 
 // Initialize when overlay opens
 const originalOpenLogParser = window.openLogParser;
-window.openLogParser = function() {
+window.openLogParser = function () {
     originalOpenLogParser();
     initializeParserFileInput();
 };

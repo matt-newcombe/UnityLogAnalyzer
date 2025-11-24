@@ -5,11 +5,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Unity Log Analyzer</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script
         src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
     <script src="static/js/dexie.min.js"></script>
     <!-- Utility Scripts -->
+    <script src="static/js/category-colors.js"></script>
     <script src="static/js/database-timeline.js"></script>
     <script src="static/js/database-log-lines.js"></script>
     <script src="static/js/database.js"></script>
@@ -18,19 +21,25 @@
     <script src="static/js/api-client.js"></script>
     <script src="static/js/chart-helpers.js"></script>
     <script src="static/js/slack-integration.js"></script>
-    <script src="static/js/log-lines-progress.js"></script>
     <script src="static/js/file-upload.js"></script>
-    <script src="static/js/log-parser.js"></script>
+    <script src="static/js/asset-mappings.js"></script>
+    <script src="static/js/parsing-database-operations.js"></script>
+    <script type="module" src="static/js/timeline-normalizer.js"></script>
+    <script type="module" src="static/js/log-parser.js"></script>
     <script src="static/js/log-parser-page.js"></script>
     <script src="static/js/log-viewer.js"></script>
     <script src="static/js/tables.js"></script>
     <script src="static/js/timeline.js"></script>
+    <script src="static/js/base-chart.js"></script>
     <script src="static/js/charts.js"></script>
     <script src="static/js/overview.js"></script>
     <script src="static/js/navigation.js"></script>
     <script src="static/js/folder-analysis.js"></script>
     <script src="static/js/pipeline.js"></script>
     <script src="static/js/operations-table.js"></script>
+    <script src="static/js/cache-server-blocks.js"></script>
+    <script type="module" src="static/js/live-monitor.js"></script>
+    <script src="static/js/file-watcher-setup.js"></script>
     <link rel="stylesheet" href="static/css/dashboard.css">
     <script>
         // Load and display version number
@@ -57,7 +66,7 @@
     <div class="container">
         <header>
             <div class="header-content">
-                <h1><svg width="128" height="80" viewBox="0 0 120 30"
+                <h1> <svg width="128" height="80" viewBox="0 0 120 30"
                         style="vertical-align: middle; margin-right: 15px; display: inline-block;"
                         xmlns="http://www.w3.org/2000/svg">
                         <rect fill="#e4e4e4" x="0" y="0" width="120" height="30" />
@@ -81,65 +90,39 @@
                         style="color: #667eea; font-size: 0.6em; margin-left: 15px;"></span><span id="unity-version"
                         style="color: #999; font-size: 0.5em; margin-left: 10px;"></span></h1>
                 <p class="subtitle">Interactive visualization of Unity Editor.log performance data</p>
-                <p id="version-display" style="font-size: 0.85em; color: #999; margin-top: 5px;">Version: Loading...</p>
-            </div>
-            <div class="header-nav">
-                <button onclick="openLogParser()" class="nav-button"
-                    style="background: #4CAF50; border: none; cursor: pointer; height: 90px; width: 135px; padding: 8px 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 1em; text-align: center; flex-direction: column; gap: 4px; box-sizing: border-box; overflow: hidden;">📁<span
-                        style="font-size: 0.85em; line-height: 1.2;">Parse Log File</span></button>
-                <button onclick="openLogViewer(1)" class="nav-button"
-                    style="height: 90px; width: 135px; padding: 8px 12px; display: inline-flex; align-items: center; justify-content: center; position: relative; font-size: 1em; text-align: center; flex-direction: column; gap: 4px; box-sizing: border-box; overflow: hidden; background: #667eea; border: none; cursor: pointer;">
-                    <span style="display: flex; align-items: center; gap: 4px;">📄<span
-                            style="font-size: 0.85em; line-height: 1.2;">View Full Log</span></span>
-                    <span id="log-lines-progress-indicator"
-                        style="display: none; font-size: 0.7em; color: #667eea; font-weight: normal; margin-top: 2px;">
-                        <span id="log-lines-progress-text"></span>
-                    </span>
-                </button>
+                <div style="display: flex; align-items: center; gap: 15px; margin-top: 5px;">
+                    <p id="version-display" style="font-size: 0.85em; color: #999; margin: 0;">Version: Loading...</p>
+                </div>
             </div>
         </header>
 
-        <div id="loading" class="loading" style="display: none;">
-            <span class="loading-spinner"></span>
-            <span id="loading-text">Loading data</span>
-            <div id="loading-progress"></div>
-            <!-- Progress bar for batch log storage -->
-            <div id="batch-progress-container" style="display: none; margin-top: 15px; width: 100%; max-width: 600px;">
-                <div id="batch-progress-time" style="margin-bottom: 8px; font-size: 0.9em; color: #666;">
-                    Estimated time remaining: Calculating...
-                </div>
-                <div
-                    style="width: 100%; height: 24px; background-color: #e0e0e0; border-radius: 12px; overflow: hidden; position: relative;">
-                    <div id="batch-progress-bar"
-                        style="height: 100%; background-color: #4CAF50; width: 0%; transition: width 0.3s ease; border-radius: 12px;">
-                    </div>
-                    <div id="batch-progress-text"
-                        style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.85em; font-weight: bold; color: #333; text-shadow: 0 0 2px white;">
-                        0%
-                    </div>
-                </div>
-                <button id="batch-cancel-btn" onclick="cancelBatchStorage()"
-                    style="display: none; margin-top: 10px; padding: 8px 16px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
-                    Cancel
-                </button>
+        <!-- Action Buttons Bar -->
+        <div id="action-buttons-bar" class="action-buttons-bar">
+            <div class="action-buttons-group">
+                <button onclick="openLogParser()" class="action-btn action-btn-primary" id="parse-log-btn">📁 Parse Log
+                    File</button>
+                <button onclick="toggleWatchEditorLog()" class="action-btn action-btn-secondary"
+                    id="watch-editor-log-btn" style="display: none;">👁️ Watch Editor Log</button>
+                <button onclick="loadDummyData()" class="action-btn action-btn-info" id="load-dummy-data-btn">🧪 Load
+                    Dummy Data</button>
+            </div>
+            <div id="timestamp-status" style="display: none; flex: 1; margin: 0 20px;"></div>
+            <div class="action-buttons-group">
+                <button onclick="clearDashboardAndDatabase()" class="action-btn action-btn-warning" id="clear-btn">🗑️
+                    Clear All</button>
             </div>
         </div>
-        <div id="error" class="error" style="display: none;"></div>
 
-        <!-- Thin progress bar for log line loading -->
-        <div id="log-lines-progress-bar-container" style="display: none; margin-bottom: 15px; width: 100%;">
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
-                <span style="font-size: 0.85em; color: #666; white-space: nowrap;">Inserting log lines into
-                    database:</span>
-                <div
-                    style="flex: 1; height: 4px; background-color: #e0e0e0; border-radius: 2px; overflow: hidden; position: relative;">
-                    <div id="log-lines-progress-bar-fill"
-                        style="height: 100%; background-color: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
-                </div>
-                <span id="log-lines-progress-bar-text"
-                    style="font-size: 0.85em; color: #666; white-space: nowrap; min-width: 80px; text-align: right;">0%</span>
-            </div>
+        <div id="monitoring-status" class="monitoring-status" style="display: none; margin-bottom: 20px;">
+            <span class="monitoring-indicator">
+                <span class="monitoring-light"></span>
+            </span>
+            <span class="monitoring-path" id="monitoring-path-text"></span>
+            <span id="last-message-time"
+                style="margin-left: 12px; font-size: 0.85em; color: #666; max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
         </div>
+
+        <div id="error" class="error" style="display: none;"></div>
 
         <div id="stats" class="stats-grid" style="display: none;"></div>
         <div id="charts" class="charts-grid" style="display: none;"></div>
@@ -147,12 +130,13 @@
 
         <div id="slack-button-container" style="text-align: center; margin: 40px 0; padding: 20px;">
             <button class="nav-button" onclick="copySlackHeadlines()"
-                style="background: #667eea; border: none; cursor: pointer; height: 44px; padding: 0 16px;"
+                style="background: #667eea; border: none; cursor: grab; height: 44px; padding: 0 16px;"
                 id="slack-copy-btn">📋 Copy Headlines for Slack</button>
         </div>
     </div>
 
     <script>
+        // Lines processed counter update function
         // Register datalabels plugin globally
         Chart.register(ChartDataLabels);
 
@@ -174,11 +158,269 @@
             return seconds.toFixed(2) + 's';
         }
 
+        // Toast notification system (replaces alert/confirm)
+        function showToast(message, type = 'info', duration = 4000) {
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${type === 'error' ? '#f44336' : type === 'success' ? '#4CAF50' : type === 'warning' ? '#ff9800' : '#2196F3'};
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+                z-index: 10000;
+                font-weight: 600;
+                max-width: 400px;
+                word-wrap: break-word;
+                animation: slideIn 0.3s ease;
+            `;
+            toast.textContent = message;
+
+            // Add animation
+            const style = document.createElement('style');
+            if (!document.getElementById('toast-animations')) {
+                style.id = 'toast-animations';
+                style.textContent = `
+                    @keyframes slideIn {
+                        from { transform: translateX(100%); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                    @keyframes slideOut {
+                        from { transform: translateX(0); opacity: 1; }
+                        to { transform: translateX(100%); opacity: 0; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
+        }
+        window.showToast = showToast;
+
+        // Clear dashboard and database
+        async function clearDashboardAndDatabase() {
+
+            try {
+                // Stop any active monitoring
+                if (window.liveMonitor) {
+                    const activeMonitors = window.liveMonitor.getActiveMonitors();
+                    for (const logId of activeMonitors) {
+                        await window.liveMonitor.stopMonitoring(logId);
+                    }
+                }
+
+                // Close current database
+                const currentDb = await getCurrentDatabase();
+                if (currentDb && currentDb.db) {
+                    await currentDb.close();
+                }
+
+                // Create new database
+                const newDb = await createNewDatabase();
+                await newDb.open();
+
+                // Update API client
+                if (window.apiClient) {
+                    if (window.apiClient.db) {
+                        await window.apiClient.db.close().catch(() => { });
+                    }
+                    window.apiClient.db = newDb;
+                }
+
+                // Clear dashboard
+                if (window.clearDashboard) {
+                    window.clearDashboard();
+                }
+
+                // Refresh
+                if (typeof loadLogList === 'function') {
+                    loadLogList();
+                }
+
+                showToast('Database cleared successfully', 'success');
+            } catch (error) {
+                console.error('Error clearing database:', error);
+                showToast('Error clearing database: ' + error.message, 'error');
+            }
+        }
+        window.clearDashboardAndDatabase = clearDashboardAndDatabase;
+        window.performClear = clearDashboardAndDatabase; // Alias for live-monitor.js
+
+        // Update watch button state
+        function updateWatchButtonState() {
+            const watchBtn = document.getElementById('watch-editor-log-btn');
+            const monitoringStatus = document.getElementById('monitoring-status');
+            const monitoringPathText = document.getElementById('monitoring-path-text');
+
+            if (!watchBtn) return;
+
+            if (window.liveMonitor) {
+                const activeMonitors = window.liveMonitor.getActiveMonitors();
+                if (activeMonitors.length > 0) {
+                    // Active monitoring - change button to "Stop Watching"
+                    watchBtn.classList.remove('action-btn-secondary');
+                    watchBtn.classList.add('action-btn-danger');
+                    watchBtn.innerHTML = '⏹️ Stop Watching';
+                    watchBtn.onclick = toggleWatchEditorLog;
+
+                    // Show monitoring status with file path
+                    if (monitoringStatus) {
+                        const firstLogId = activeMonitors[0];
+                        const monitor = window.liveMonitor.activeMonitors.get(firstLogId);
+                        if (monitor && monitor.filePath) {
+                            monitoringPathText.textContent = monitor.filePath;
+                            monitoringStatus.style.display = 'flex';
+                        } else {
+                            monitoringStatus.style.display = 'none';
+                        }
+                    }
+                } else {
+                    // No active monitoring - change button to "Watch Editor Log"
+                    watchBtn.classList.remove('action-btn-danger');
+                    watchBtn.classList.add('action-btn-secondary');
+                    watchBtn.innerHTML = '👁️ Watch Editor Log';
+                    watchBtn.onclick = toggleWatchEditorLog;
+
+                    // Hide monitoring status
+                    if (monitoringStatus) {
+                        monitoringStatus.style.display = 'none';
+                    }
+                }
+            }
+        }
+        window.updateWatchButtonState = updateWatchButtonState;
+
+        // Toggle Watch Editor Log function
+        async function toggleWatchEditorLog() {
+            if (!window.liveMonitor) {
+                showToast('Live monitor not available', 'error');
+                return;
+            }
+
+            const activeMonitors = window.liveMonitor.getActiveMonitors();
+
+            // If already watching, stop it
+            if (activeMonitors.length > 0) {
+                for (const logId of activeMonitors) {
+                    await window.liveMonitor.stopMonitoring(logId);
+                }
+                updateWatchButtonState();
+                showToast('Monitoring stopped.', 'success');
+                return;
+            }
+
+            // Otherwise, start watching
+            const isAvailable = await window.liveMonitor.isFileWatcherAvailable();
+
+            if (isAvailable) {
+                try {
+                    const db = await getCurrentDatabase();
+                    await db.open();
+
+                    const watchUrl = window.liveMonitor._getFileWatcherUrl('/watch');
+                    if (!watchUrl) {
+                        throw new Error('File watcher service not available');
+                    }
+
+                    const watchResponse = await fetch(watchUrl);
+                    const watchData = await watchResponse.json();
+
+                    if (watchData.error) {
+                        throw new Error(watchData.error);
+                    }
+
+                    const detectedFilePath = watchData.file_path;
+                    console.log(`[Watch] File watcher started watching: ${detectedFilePath}`);
+
+                    // Create a minimal log entry that will be populated by polling
+                    const fileName = detectedFilePath.split('/').pop() || detectedFilePath.split('\\').pop() || 'Editor.log';
+                    const metadata = {
+                        log_file: fileName,
+                        date_parsed: new Date().toISOString(),
+                        total_lines: null,
+                        total_parse_time_ms: null,
+                        timestampsEnabled: null // Will be set by MetadataHandler during parsing
+                    };
+
+                    const logId = await db.insertLogMetadata(metadata);
+                    console.log(`[Watch] Created log entry (log_id: ${logId}), starting polling from beginning`);
+
+                    // Start live monitoring - it will poll from position 0 and process all existing content
+                    await window.liveMonitor.startWatchingWithFileWatcher(logId, detectedFilePath, db);
+                    updateWatchButtonState();
+                    loadLogList();
+                } catch (error) {
+                    console.error('[Watch] Error:', error);
+                    showToast(`Failed to start watching: ${error.message}`, 'error');
+                }
+            } else {
+                if (window.fileWatcherSetup) {
+                    window.fileWatcherSetup.showSetupInstructions();
+                } else {
+                    showToast('File watcher service not available. Please run editor_log_watcher.py', 'error');
+                }
+            }
+        }
+        window.toggleWatchEditorLog = toggleWatchEditorLog;
+        window.watchEditorLog = toggleWatchEditorLog; // Backward compatibility
+
+        // Load dummy data for testing
+        async function loadDummyData() {
+            try {
+                // Fetch the dummy log file from root
+                const response = await fetch('dummy.log');
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch dummy.log: ${response.statusText}`);
+                }
+
+                const content = await response.text();
+                const blob = new Blob([content], { type: 'text/plain' });
+                const file = new File([blob], 'dummy.log', { type: 'text/plain' });
+
+                // Open the log parser modal
+                if (typeof openLogParser === 'function') {
+                    openLogParser();
+                } else if (window.openLogParser) {
+                    window.openLogParser();
+                } else {
+                    throw new Error('Log parser not available');
+                }
+
+                // Wait for modal to open and initialize
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                // Programmatically trigger file selection
+                const fileInput = document.getElementById('parser-file-input');
+                if (!fileInput) {
+                    throw new Error('File input not found');
+                }
+
+                // Create a DataTransfer to set the file
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(file);
+                fileInput.files = dataTransfer.files;
+
+                // Trigger the change event
+                const event = new Event('change', { bubbles: true });
+                fileInput.dispatchEvent(event);
+
+            } catch (error) {
+                console.error('Error loading dummy data:', error);
+                showToast(`Failed to load dummy data: ${error.message}`, 'error');
+            }
+        }
+        window.loadDummyData = loadDummyData;
+
         // Initialize
         loadLogList();
 
-        // Start polling for log lines progress
-        startProgressPolling();
 
         function navigateToLogLine(lineNumber) {
             if (lineNumber && lineNumber > 0) {
@@ -411,22 +653,12 @@
                     }, 100);
                 }
             });
-        } function showLoading(message = 'Loading data') {
-            const loadingDiv = document.getElementById('loading');
-            const loadingText = document.getElementById('loading-text');
-            loadingText.textContent = message;
-            loadingDiv.style.display = 'block';
-        }
-
-        function hideLoading() {
-            document.getElementById('loading').style.display = 'none';
         }
 
         function showError(message) {
             const errorDiv = document.getElementById('error');
             errorDiv.textContent = message;
             errorDiv.style.display = 'block';
-            hideLoading();
         }
 
         function hideError() {
@@ -441,15 +673,15 @@
     <!-- Log Parser Overlay -->
     <div id="log-parser-overlay" class="log-viewer-overlay" style="display: none;">
         <div id="log-parser-panel"
-            style="position: relative; background: white; border-radius: 8px; width: 900px; max-height: 90vh; overflow-y: auto; margin: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
-            <div class="log-viewer-header">
-                <h2>📁 Parse Unity Log File</h2>
-                <button class="log-viewer-close" onclick="cancelLogParser()">×</button>
-            </div>
-            <div style="padding: 20px;">
+            style="position: relative; background: white; border-radius: 8px; width: 900px; max-height: 90vh; overflow-y: auto; margin: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+            <div style="padding: 20px; position: relative;">
+                <button class="log-viewer-close" onclick="cancelLogParser()"
+                    style="position: absolute; top: 15px; right: 15px; width: 28px; height: 28px; font-size: 1.2em; background: transparent; border: none; color: #666; cursor: grab; border-radius: 4px; transition: background 0.2s; z-index: 10;"
+                    onmouseover="this.style.background='#f0f0f0'"
+                    onmouseout="this.style.background='transparent'">×</button>
                 <div class="file-upload-area" id="parser-upload-area"
                     onclick="document.getElementById('parser-file-input').click()"
-                    style="border: 2px dashed #667eea; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; margin-bottom: 30px; cursor: pointer; transition: all 0.3s ease;">
+                    style="border: 2px dashed #667eea; border-radius: 8px; padding: 40px; text-align: center; background: #f8f9fa; margin-bottom: 30px; cursor: grab; transition: all 0.3s ease;">
                     <div style="font-size: 3em; margin-bottom: 20px;">📄</div>
                     <h2>Click to select a log file</h2>
                     <p style="color: #999; margin-top: 10px;">or drag and drop your .log file here</p>
@@ -457,18 +689,19 @@
                 </div>
 
                 <div id="parser-progress-container" style="display: none; margin-top: 30px;">
-                    <div id="parser-progress-text" style="margin-bottom: 15px; font-size: 1.1em; color: #666;">Preparing
-                        to parse...</div>
+                    <div id="parser-output-toggle-container" style="margin-bottom: 15px;">
+                        <button id="parser-output-toggle-btn" onclick="toggleParserOutput()"
+                            style="padding: 6px 12px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 4px; cursor: grab; font-size: 0.85em; color: #666; transition: background 0.2s;"
+                            onmouseover="this.style.background='#e0e0e0'" onmouseout="this.style.background='#f0f0f0'">
+                            Show output
+                        </button>
+                    </div>
+
                     <div id="parser-loading-progress"
-                        style="background: #f5f5f5; border-radius: 4px; padding: 15px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.9em; white-space: pre-wrap; margin-bottom: 15px;">
+                        style="display: none; background: #f5f5f5; border-radius: 4px; padding: 15px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.9em; white-space: pre-wrap; margin-bottom: 15px;">
                     </div>
 
                     <div id="parser-progress-bars-container" style="margin-top: 20px;"></div>
-
-                    <button id="parser-batch-cancel-btn" onclick="cancelBatchStorage()"
-                        style="display: none; margin-top: 10px; padding: 8px 16px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
-                        Cancel
-                    </button>
                 </div>
 
                 <div id="parser-error-container"
@@ -486,13 +719,13 @@
                     </p>
                     <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
                         <button
-                            onclick="closeLogParser(); if (typeof loadLogList === 'function') loadLogList(); else if (window.loadLogList) window.loadLogList();"
+                            onclick="closeLogParserAndRefresh()"
                             class="nav-button"
-                            style="background: #4CAF50; border: none; cursor: pointer; height: 44px; padding: 0 24px; display: inline-flex; align-items: center; text-decoration: none; color: white; font-weight: bold; border-radius: 4px;">
+                            style="background: #4CAF50; border: none; cursor: grab; height: 44px; padding: 0 24px; display: inline-flex; align-items: center; text-decoration: none; color: white; font-weight: bold; border-radius: 4px;">
                             Close & Refresh Dashboard
                         </button>
                         <button onclick="resetParser()" class="nav-button"
-                            style="background: #667eea; border: none; cursor: pointer; height: 44px; padding: 0 24px; display: inline-flex; align-items: center; text-decoration: none; color: white; font-weight: bold; border-radius: 4px;">
+                            style="background: #667eea; border: none; cursor: grab; height: 44px; padding: 0 24px; display: inline-flex; align-items: center; text-decoration: none; color: white; font-weight: bold; border-radius: 4px;">
                             Parse Another Log File
                         </button>
                     </div>

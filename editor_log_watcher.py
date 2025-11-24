@@ -74,6 +74,7 @@ class FileWatcherService:
         self.last_position = 0
         self.observers = []
         self.lock = threading.Lock()
+        self.last_line_sent = None  # Track last line sent to site
         
         # Start file watcher (if watchdog is available)
         if self.file_path.exists():
@@ -92,7 +93,7 @@ class FileWatcherService:
         observer.schedule(event_handler, str(self.file_path.parent), recursive=False)
         observer.start()
         self.observers.append(observer)
-        print(f"Watching file: {self.file_path}")
+        print(f"✓ Watching Unity editor log file: {self.file_path}", flush=True)
     
     def _on_file_changed(self):
         """Called when file is modified"""
@@ -182,7 +183,79 @@ class FileWatcherHTTPHandler(http.server.SimpleHTTPRequestHandler):
         if path != '/api/poll':
             print(f"📥 Request: {path}", flush=True)
         
-        # Set content type for API responses
+        # Handle SSE stream endpoint FIRST (before setting default JSON headers)
+        if path == '/api/stream':
+            # Server-Sent Events (SSE) stream for real-time line delivery
+            print(f"📡 SSE stream request received", flush=True)
+            if not current_watcher:
+                self.send_response(400)
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'No file being watched. Call /api/watch first.')
+                return
+            
+            # Set up SSE headers
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            # Note: CORS header is set in end_headers() method, don't duplicate it here
+            self.end_headers()
+            
+            # Get starting line number from query (if provided)
+            start_line = int(query.get('start_line', [1])[0])
+            current_line = start_line
+            
+            try:
+                import time
+                poll_interval = 0.1  # Check for new lines every 100ms
+                last_position = current_watcher.last_position
+                
+                # Send initial connection message
+                self.wfile.write(f"data: {json.dumps({'type': 'connected', 'start_line': start_line})}\n\n".encode())
+                self.wfile.flush()
+                
+                # Continuously read and send new lines
+                while True:
+                    # Check if client disconnected (would raise exception on write)
+                    try:
+                        # Get new lines
+                        new_lines, was_reset = current_watcher.get_new_lines()
+                        
+                        if was_reset:
+                            # Send reset event
+                            self.wfile.write(f"data: {json.dumps({'type': 'reset', 'line': current_line})}\n\n".encode())
+                            self.wfile.flush()
+                            current_line = 1
+                            last_position = 0
+                        
+                        # Send each new line as it's read
+                        for line in new_lines:
+                            if line.strip():  # Only send non-empty lines
+                                current_watcher.last_line_sent = line
+                                print(f"📤 Last line sent: {line[:100]}{'...' if len(line) > 100 else ''}", flush=True)
+                                self.wfile.write(f"data: {json.dumps({'type': 'line', 'line': line, 'line_number': current_line})}\n\n".encode())
+                                self.wfile.flush()
+                                current_line += 1
+                        
+                        # Small sleep to avoid busy-waiting
+                        time.sleep(poll_interval)
+                        
+                    except (BrokenPipeError, OSError):
+                        # Client disconnected
+                        print(f"📤 SSE client disconnected", flush=True)
+                        break
+                        
+            except Exception as e:
+                # Send error and close
+                try:
+                    self.wfile.write(f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n".encode())
+                    self.wfile.flush()
+                except:
+                    pass
+            return
+        
+        # Set content type for all other API responses (JSON)
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
@@ -239,7 +312,7 @@ class FileWatcherHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     'auto_detected': auto_detected,
                     'info': file_info
                 }).encode())
-                print(f"✓ Now watching: {file_path}", flush=True)
+                print(f"✓ Watching Unity editor log file: {file_path}", flush=True)
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
         
@@ -253,6 +326,12 @@ class FileWatcherHTTPHandler(http.server.SimpleHTTPRequestHandler):
             
             new_lines, was_reset = current_watcher.get_new_lines()
             info = current_watcher.get_file_info()
+            
+            # Log last line sent if there are new lines
+            if new_lines:
+                last_line = new_lines[-1]
+                current_watcher.last_line_sent = last_line
+                print(f"📤 Last line sent (poll): {last_line[:100]}{'...' if len(last_line) > 100 else ''}", flush=True)
             
             self.wfile.write(json.dumps({
                 'new_lines': new_lines,
@@ -371,6 +450,7 @@ class FileWatcherHTTPHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 def main():
+    global current_watcher
     import sys
     import socket
     
@@ -387,6 +467,7 @@ def main():
     print(f"  GET /api/watch?file=<path>  - Start watching a file (auto-detects if no path)", flush=True)
     print(f"  GET /api/poll               - Get new lines since last poll", flush=True)
     print(f"  GET /api/read?start=<pos>   - Read file content from position", flush=True)
+    print(f"  GET /api/stream?start_line=<n> - SSE stream for real-time line delivery", flush=True)
     print(f"  GET /api/info               - Get file information", flush=True)
     print(f"  GET /api/update_position?position=<pos> - Update last processed position", flush=True)
     print(f"  GET /api/stop               - Stop watching", flush=True)
@@ -408,12 +489,12 @@ def main():
         print(f"⚠️  ERROR: Port {PORT} is already in use!", flush=True)
         print(f"", flush=True)
         print(f"This usually means:", flush=True)
-        print(f"  1. Another instance of file_watcher.py is already running", flush=True)
+        print(f"  1. Another instance of editor_log_watcher.py is already running", flush=True)
         print(f"  2. The integrated file watcher in start.py is using this port", flush=True)
         print(f"  3. Another application is using port {PORT}", flush=True)
         print(f"", flush=True)
         print(f"To fix this:", flush=True)
-        print(f"  - If using start.py, you don't need to run file_watcher.py separately", flush=True)
+        print(f"  - If using start.py, you don't need to run editor_log_watcher.py separately", flush=True)
         print(f"  - If you need the standalone watcher, stop the other instance first", flush=True)
         print(f"  - Or find and kill the process using port {PORT}:", flush=True)
         print(f"    lsof -ti:{PORT} | xargs kill", flush=True)
@@ -421,9 +502,11 @@ def main():
         sys.exit(1)
     
     try:
+        # Allow address reuse to handle TIME_WAIT states
+        socketserver.TCPServer.allow_reuse_address = True
         with socketserver.TCPServer(("", PORT), FileWatcherHTTPHandler) as httpd:
             try:
-                print(f"✓ Server started successfully on port {PORT}", flush=True)
+                print(f"✓ Successfully connected to server on port {PORT}", flush=True)
                 print(f"✓ Waiting for file watch requests...", flush=True)
                 print("", flush=True)
                 httpd.serve_forever()
@@ -439,12 +522,12 @@ def main():
             print(f"⚠️  ERROR: Port {PORT} is already in use!", flush=True)
             print(f"", flush=True)
             print(f"This usually means:", flush=True)
-            print(f"  1. Another instance of file_watcher.py is already running", flush=True)
+            print(f"  1. Another instance of editor_log_watcher.py is already running", flush=True)
             print(f"  2. The integrated file watcher in start.py is using this port", flush=True)
             print(f"  3. Another application is using port {PORT}", flush=True)
             print(f"", flush=True)
             print(f"To fix this:", flush=True)
-            print(f"  - If using start.py, you don't need to run file_watcher.py separately", flush=True)
+            print(f"  - If using start.py, you don't need to run editor_log_watcher.py separately", flush=True)
             print(f"  - If you need the standalone watcher, stop the other instance first", flush=True)
             print(f"  - Or find and kill the process using port {PORT}:", flush=True)
             print(f"    lsof -ti:{PORT} | xargs kill", flush=True)

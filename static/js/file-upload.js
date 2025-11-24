@@ -61,29 +61,7 @@
          * Update progress display with message and database size
          */
         function updateStorageProgress(message, dbSizeMB = null) {
-            const progressDiv = document.getElementById('loading-progress');
-            if (!progressDiv) return;
-            
-            let progressText = message;
-            if (dbSizeMB !== null) {
-                progressText += ` (Database size: ${dbSizeMB.toFixed(2)} MB)`;
-            }
-            
-            // Append to progress (add new line)
-            const currentText = progressDiv.textContent;
-            if (currentText) {
-                progressDiv.textContent = currentText + '\n' + progressText;
-            } else {
-                progressDiv.textContent = progressText;
-            }
-            
-            // Scroll to bottom
-            progressDiv.scrollTop = progressDiv.scrollHeight;
-            
-            // Also log to console (but not for batch progress updates)
-            if (!message.includes('Batch ') || !message.includes('batch')) {
-                console.log(progressText);
-            }
+            // Progress feedback removed - no UI updates
         }
 
         /**
@@ -103,7 +81,6 @@
          * Clear all dashboard content to prevent showing stale data
          */
         function clearDashboard() {
-            console.log('[Dashboard] Clearing dashboard content...');
             
             // Clear stats
             const statsDiv = document.getElementById('stats');
@@ -118,9 +95,7 @@
                 // Destroy all Chart.js instances to prevent memory leaks
                 Chart.getChart('categoryChart')?.destroy();
                 Chart.getChart('typeTimeChart')?.destroy();
-                Chart.getChart('typeCountChart')?.destroy();
                 Chart.getChart('foldersChart')?.destroy();
-                Chart.getChart('pipelineBreakdownChart')?.destroy();
                 Chart.getChart('importerChart')?.destroy();
                 
                 // Destroy stdDevChartInstance if it exists (from histogram view)
@@ -164,13 +139,7 @@
                 slackButtonContainer.style.display = 'none';
             }
             
-            // Show loading state
-            const loadingDiv = document.getElementById('loading');
-            if (loadingDiv) {
-                loadingDiv.style.display = 'flex';
-            }
             
-            console.log('[Dashboard] Dashboard cleared');
         }
 
         // Export loadLogList to global scope
@@ -183,7 +152,6 @@
                 
                 if (logs.length === 0) {
                     // Show empty state - user can upload a file
-                    hideLoading();
                     showEmptyState();
                     return;
                 }
@@ -193,14 +161,9 @@
                 updateProjectName(logs[0].project_name);
                 loadOverview();
                 
-                // Restart progress polling to ensure worker progress is displayed
-                if (window.startProgressPolling) {
-                    window.startProgressPolling();
-                }
             } catch (error) {
                 // Database might not exist yet - show empty state
                 console.error('Error loading log list:', error);
-                hideLoading();
                 showEmptyState();
             }
         };

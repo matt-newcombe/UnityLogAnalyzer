@@ -176,17 +176,14 @@
         function setupFolderTableContextMenus() {
             const tbody = document.querySelector('#folder-table-scroll tbody');
             if (!tbody) {
-                console.log('Folder table tbody not found');
                 return;
             }
             
             const rows = tbody.querySelectorAll('tr');
-            console.log('Found', rows.length, 'rows in folder table');
             
             rows.forEach((row, index) => {
                 const path = row.getAttribute('data-folder-path');
                 if (!path) {
-                    console.log('Row', index, 'has no data-folder-path attribute');
                     return;
                 }
                 
@@ -196,7 +193,6 @@
                 row.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    console.log('Right-click on folder row, path:', decodedPath);
                     showContextMenu(e, decodedPath);
                 });
             });

@@ -29,7 +29,7 @@ class LogLinesQuery {
         await this.db.open();
         const metadata = await this.db.log_metadata.get(this.logId);
         if (!metadata) {
-            throw new Error(`Log metadata not found for ID: ${this.logId}`);
+            throw new Error(`Log metadata not found for log_id: ${this.logId}`);
         }
 
         const totalLines = metadata.total_lines || 0;
@@ -47,7 +47,7 @@ class LogLinesQuery {
         const file = window.logFileCache.get(this.logId);
         
         if (!file) {
-            throw new Error(`File not found in memory cache for ID: ${this.logId}. Please re-upload the log file.`);
+            throw new Error(`File not found in memory cache for log_id: ${this.logId}. Please re-upload the log file.`);
         }
         
         // Verify file object is a File (not a Blob) to ensure byte positions are preserved
@@ -94,8 +94,6 @@ class LogLinesQuery {
      * Now uses byte_offset from asset_imports/operations instead of line_index
      */
     async _queryByCenterLine(center_line, totalLines, file) {
-        console.log(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] _queryByCenterLine called with center_line=${center_line}, totalLines=${totalLines}`);
-        
         const contextSize = 50; // Load 50 lines before and after
         
         // Clamp center_line to valid range
@@ -113,38 +111,24 @@ class LogLinesQuery {
         // Try to find byte_offset from asset_imports or operations for the center line
         await this.db.open();
         let centerByteOffset = null;
-        let sourceType = null; // Track where the byte_offset came from for debugging
         
         // Check asset_imports first
         const assetImport = await this.db.asset_imports
+            .where('log_id').equals(this.logId)
             .filter(ai => ai.line_number === center_line)
             .first();
         
         if (assetImport && assetImport.byte_offset !== null && assetImport.byte_offset !== undefined) {
             centerByteOffset = assetImport.byte_offset;
-            sourceType = 'asset_import';
-            console.log(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] Found byte_offset ${centerByteOffset} from asset_import for line ${center_line}`);
         } else {
-            // Check processes
-            const operation = await this.db.processes
+            // Check operations
+            const operation = await this.db.operations
+                .where('log_id').equals(this.logId)
                 .filter(op => op.line_number === center_line)
                 .first();
             
             if (operation && operation.byte_offset !== null && operation.byte_offset !== undefined) {
                 centerByteOffset = operation.byte_offset;
-                sourceType = 'process';
-                console.log(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] Found byte_offset ${centerByteOffset} from process for line ${center_line}`);
-            } else {
-                // Check cache_server_download_blocks
-                const cacheBlock = await this.db.cache_server_download_blocks
-                    .filter(block => block.line_number === center_line)
-                    .first();
-                
-                if (cacheBlock && cacheBlock.byte_offset !== null && cacheBlock.byte_offset !== undefined) {
-                    centerByteOffset = cacheBlock.byte_offset;
-                    sourceType = 'cache_server_block';
-                    console.log(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] Found byte_offset ${centerByteOffset} from cache_server_block for line ${center_line}`);
-                }
             }
         }
         
@@ -152,8 +136,6 @@ class LogLinesQuery {
             // Fallback: estimate byte offset based on line number (rough approximation)
             // For ASCII files, average ~80 bytes per line
             centerByteOffset = center_line * 80;
-            sourceType = 'estimated';
-            console.log(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] No byte_offset found in database, using estimated ${centerByteOffset} for line ${center_line}`);
         }
         
         // To accurately find the line number at centerByteOffset, we need to count newlines
@@ -177,9 +159,8 @@ class LogLinesQuery {
         
         // Verify: actualLineNumber should equal center_line (from asset_import)
         if (actualLineNumber !== center_line) {
-            console.error(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] CRITICAL: Byte offset ${centerByteOffset} points to line ${actualLineNumber}, but ${sourceType} says ${center_line}. This indicates the byte offset was stored incorrectly during parsing.`);
+            console.error(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] CRITICAL: Byte offset ${centerByteOffset} points to line ${actualLineNumber}, but asset_import says ${center_line}. This indicates the byte offset was stored incorrectly during parsing.`);
             console.error(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] The byte offset calculation during parsing may be wrong. Using actual line number ${actualLineNumber} instead of ${center_line}.`);
-            console.error(`[LogViewer v${LOG_VIEWER_VERSION_PATCH}] Source: ${sourceType}, centerByteOffset: ${centerByteOffset}`);
             // Use the actual line number from byte offset - it's more accurate
             // Update center_line to match what the byte offset actually points to
             const correctedCenterLine = actualLineNumber;
@@ -246,6 +227,7 @@ class LogLinesQuery {
                 const parsedLine = this._parseLine(lineContent, currentLineNumber);
                 
                 lines.push({
+                    log_id: this.logId,
                     line_number: currentLineNumber,
                     content: lineContent,
                     line_type: parsedLine.lineType,
@@ -308,6 +290,7 @@ class LogLinesQuery {
                 const parsedLine = this._parseLine(lineContent, currentLineNumber);
                 
                 lines.push({
+                    log_id: this.logId,
                     line_number: currentLineNumber,
                     content: lineContent,
                     line_type: parsedLine.lineType,
@@ -402,6 +385,7 @@ class LogLinesQuery {
                     const lineContent = allLines[i];
                     const parsedLine = this._parseLine(lineContent, i + 1);
                     lines.push({
+                        log_id: this.logId,
                         line_number: i + 1,
                         content: lineContent,
                         line_type: parsedLine.lineType,
@@ -427,6 +411,7 @@ class LogLinesQuery {
                 const lineContent = allLines[i];
                 const parsedLine = this._parseLine(lineContent, i + 1);
                 lines.push({
+                    log_id: this.logId,
                     line_number: i + 1,
                     content: lineContent,
                     line_type: parsedLine.lineType,

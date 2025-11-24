@@ -31,7 +31,7 @@ async function displayAssetsTableProgressive(assetType, title) {
                 color: white;
                 border: none;
                 border-radius: 4px;
-                cursor: pointer;
+                cursor: grab;
                 font-size: 0.9em;
                 display: inline-flex;
                 align-items: center;
@@ -269,7 +269,7 @@ async function displayAssetsTable(assets, title) {
                 color: white;
                 border: none;
                 border-radius: 4px;
-                cursor: pointer;
+                cursor: grab;
                 font-size: 0.9em;
                 display: inline-flex;
                 align-items: center;
@@ -414,11 +414,15 @@ function renderAssetRows() {
  */
 function setupAssetTableScroll() {
     const scrollContainer = document.getElementById('asset-table-scroll');
-    if (!scrollContainer) return;
+    if (!scrollContainer) {
+        console.warn('[setupAssetTableScroll] scrollContainer is null, cannot add event listener');
+        return;
+    }
     
     let isLoadingAssets = false;
     
-    scrollContainer.addEventListener('scroll', () => {
+    try {
+        scrollContainer.addEventListener('scroll', () => {
         const scrollTop = scrollContainer.scrollTop;
         const scrollHeight = scrollContainer.scrollHeight;
         const clientHeight = scrollContainer.clientHeight;
@@ -437,6 +441,9 @@ function setupAssetTableScroll() {
             }, 100);
         }
     });
+    } catch (error) {
+        console.error('[setupAssetTableScroll] Error adding scroll listener:', error, scrollContainer);
+    }
 }
 
 /**
@@ -444,19 +451,36 @@ function setupAssetTableScroll() {
  */
 function setupAssetTableContextMenus() {
     const tbody = document.getElementById('asset-table-body');
-    if (!tbody) return;
+    if (!tbody) {
+        console.warn('[setupAssetTableContextMenus] tbody is null, cannot add context menus');
+        return;
+    }
     
     const rows = tbody.querySelectorAll('tr[data-path]');
-    rows.forEach(row => {
+    
+    rows.forEach((row, index) => {
+        if (!row) {
+            console.error(`[setupAssetTableContextMenus] Row ${index} is null, skipping`);
+            return;
+        }
+        
         const path = row.getAttribute('data-path');
-        if (!path) return;
+        if (!path) {
+            console.warn(`[setupAssetTableContextMenus] Row ${index} has no data-path, skipping`);
+            return;
+        }
+        
         const decodedPath = path.replace(/&quot;/g, '"');
         
-        row.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            showContextMenu(e, decodedPath);
-        });
+        try {
+            row.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                showContextMenu(e, decodedPath);
+            });
+        } catch (error) {
+            console.error(`[setupAssetTableContextMenus] Error adding listener to row ${index}:`, error, row);
+        }
     });
 }
 
@@ -553,7 +577,7 @@ async function displayModeTimeTable(typeData) {
             const escapedType = (type.asset_type || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
             
             return `
-                <tr style="cursor: pointer; border-bottom: 1px solid #eee;" 
+                <tr style="cursor: grab; border-bottom: 1px solid #eee;" 
                     onclick="loadStdDevView('${escapedType}')">
                     <td style="padding: 10px;">
                         <strong style="color: #1a1a1a; font-size: 0.9em;">${type.asset_type}</strong>
@@ -621,7 +645,7 @@ async function loadSlowestAssets() {
         return `
                 <tr data-line="${asset.line_number}" 
                     data-path="${escapedPath}"
-                    style="cursor: pointer; border-bottom: 1px solid #eee;">
+                    style="cursor: grab; border-bottom: 1px solid #eee;">
                     <td style="padding: 10px; width: 35%;">
                         <strong style="color: #1a1a1a; font-size: 0.9em; word-break: break-word;">${asset.asset_name}</strong>
                     </td>
@@ -641,29 +665,54 @@ async function loadSlowestAssets() {
         }).join('');
         
         // Add event listeners for click and context menu
+        if (!tbody) {
+            console.error('[loadSlowestAssets] tbody is null, cannot add event listeners');
+            return;
+        }
+        
         const rows = tbody.querySelectorAll('tr');
-        rows.forEach(row => {
+        
+        rows.forEach((row, index) => {
+            if (!row) {
+                console.error(`[loadSlowestAssets] Row ${index} is null, skipping`);
+                return;
+            }
+            
             const lineNumber = row.getAttribute('data-line');
             const path = row.getAttribute('data-path');
             
-            // Left click to navigate
-            row.addEventListener('click', () => {
-                openLogViewer(lineNumber);
-            });
+            if (!lineNumber) {
+                console.warn(`[loadSlowestAssets] Row ${index} has no data-line attribute, skipping`);
+                return;
+            }
             
-            // Right click for context menu
-            row.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const decodedPath = path.replace(/&quot;/g, '"');
-                showContextMenu(e, decodedPath);
-            });
+            try {
+                // Left click to navigate
+                row.addEventListener('click', () => {
+                    openLogViewer(lineNumber);
+                });
+                
+                // Right click for context menu
+                row.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const decodedPath = path.replace(/&quot;/g, '"');
+                    showContextMenu(e, decodedPath);
+                });
+            } catch (error) {
+                console.error(`[loadSlowestAssets] Error adding listeners to row ${index}:`, error, row);
+            }
         });
     } catch (error) {
         console.error('Failed to load slowest assets:', error);
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #dc3545;">Failed to load assets</td></tr>';
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #dc3545;">Failed to load assets</td></tr>';
+        }
     }
 }
+
+// Export to global scope
+window.loadSlowestAssets = loadSlowestAssets;
 
 /**
  * Show context menu for asset path
@@ -701,25 +750,38 @@ function showContextMenu(event, path) {
     
     // Create menu item
     const menuItem = document.createElement('div');
+    if (!menuItem) {
+        console.error('[showContextMenu] Failed to create menuItem element');
+        return;
+    }
+    
     menuItem.className = 'context-menu-item';
     menuItem.textContent = 'Copy Path';
     menuItem.style.cssText = `
         padding: 8px 16px;
-        cursor: pointer;
+        cursor: grab;
         font-size: 13px;
         color: #333;
     `;
-    menuItem.addEventListener('click', (e) => {
-        e.stopPropagation();
-        copyToClipboard(path);
-        hideContextMenu();
-    });
-    menuItem.addEventListener('mouseenter', () => {
-        menuItem.style.backgroundColor = '#f5f5f5';
-    });
-    menuItem.addEventListener('mouseleave', () => {
-        menuItem.style.backgroundColor = 'transparent';
-    });
+    
+    try {
+        menuItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            copyToClipboard(path);
+            hideContextMenu();
+        });
+        
+        menuItem.addEventListener('mouseenter', () => {
+            menuItem.style.backgroundColor = '#f5f5f5';
+        });
+        
+        menuItem.addEventListener('mouseleave', () => {
+            menuItem.style.backgroundColor = 'transparent';
+        });
+    } catch (error) {
+        console.error('[showContextMenu] Error adding event listeners to menuItem:', error, menuItem);
+        return;
+    }
     
     contextMenu.appendChild(menuItem);
     document.body.appendChild(contextMenu);

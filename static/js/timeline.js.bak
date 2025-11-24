@@ -3,12 +3,6 @@
  * Handles project load timeline visualization
  */
 
-// Store timeline data and resize handler for cleanup
-let currentTimelineData = null;
-let currentTimelineContainer = null;
-let resizeTimeoutId = null;
-let resizeHandler = null;
-
 /**
  * Display timeline visualization
  * @param {Object} data - Timeline data (unused, fetches from API)
@@ -36,29 +30,6 @@ function displayTimeline(data) {
 
             const renderStart = performance.now();
             try {
-                // Store data for resize handler
-                currentTimelineData = timelineData;
-                currentTimelineContainer = container;
-                
-                // Remove old resize handler if exists
-                if (resizeHandler) {
-                    window.removeEventListener('resize', resizeHandler);
-                }
-                
-                // Create new resize handler with debouncing
-                resizeHandler = function() {
-                    if (resizeTimeoutId) {
-                        clearTimeout(resizeTimeoutId);
-                    }
-                    resizeTimeoutId = setTimeout(() => {
-                        if (currentTimelineContainer && currentTimelineData) {
-                            drawConnectingLines(currentTimelineContainer, currentTimelineData);
-                        }
-                    }, 150); // 150ms debounce
-                };
-                
-                window.addEventListener('resize', resizeHandler);
-                
                 renderTimelineVisualization(container, timelineData, categoryData);
             } catch (renderError) {
                 console.error('[Timeline] Error during rendering:', renderError);
@@ -95,10 +66,41 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
     const segments = timelineData.segments || [];
     const summary = timelineData.summary || {};
 
-    // Build category color map using centralized logic
-    const categoryColors = categoryData && categoryData.length > 0
-        ? window.CategoryColors.buildCategoryColorMap(categoryData)
-        : window.CategoryColors.buildCategoryColorMapFromItems(segments.filter(s => s.phase === 'AssetImports' && s.category));
+    // Category colors - must match the category chart exactly
+    // Top colors are more distinct to avoid similar bluey-purple shades
+    const categoryChartColors = [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+        '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B739', '#52BE80',
+        '#EC7063', '#5DADE2', '#F1948A', '#82E0AA', '#F4D03F'
+    ];
+
+    // Use category data from API to ensure exact match with chart
+    // Category data is already sorted by total_time (descending) - same as chart
+    const categoryColors = {};
+    if (categoryData && categoryData.length > 0) {
+        // Use the exact same order and colors as the category chart
+        categoryData.forEach((category, index) => {
+            const categoryName = category.asset_category || category.category || 'Other';
+            categoryColors[categoryName] = categoryChartColors[index % categoryChartColors.length];
+        });
+    } else {
+        // Fallback: calculate from segments if category data not available
+        const categoryTimes = {};
+        segments.filter(s => s.phase === 'AssetImports' && s.category).forEach(s => {
+            if (!categoryTimes[s.category]) {
+                categoryTimes[s.category] = 0;
+            }
+            categoryTimes[s.category] += s.duration_ms;
+        });
+
+        const uniqueCategories = Object.keys(categoryTimes).sort((a, b) => {
+            return categoryTimes[b] - categoryTimes[a];  // Descending order
+        });
+
+        uniqueCategories.forEach((category, index) => {
+            categoryColors[category] = categoryChartColors[index % categoryChartColors.length];
+        });
+    }
 
     // Get unique categories for legend (use categoryData order if available, otherwise from segments)
     const uniqueCategories = categoryData && categoryData.length > 0
@@ -115,37 +117,18 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
         return `${hours}:${minutes}:${seconds}`;
     };
 
-    // Detect which types of segments exist in the timeline
-    const hasOperations = segments.some(s => s.operation_type === 'Asset Pipeline Refresh');
-    const hasCacheServer = segments.some(s => s.phase === 'CacheServerDownload');
-    
-    // Check if worker threads have phase blocks
-    const hasWorkerPhases = timelineData.worker_threads && Object.keys(timelineData.worker_threads).length > 0 && 
-        Object.keys(timelineData.worker_threads).some(workerId => {
-            const workerData = timelineData.worker_threads[workerId];
-            return workerData && workerData.phase_blocks && workerData.phase_blocks.length > 0;
-        });
-
-    // Build filter toggles HTML based on what's available
-    let filterTogglesHtml = '';
-    if (hasOperations) {
-        filterTogglesHtml += '<label style="font-size:0.9em; color:#555;"><input id="toggle-operations" type="checkbox" style="margin-right:6px;">Pipeline Refreshes</label>';
-    }
-    if (hasCacheServer) {
-        filterTogglesHtml += '<label style="font-size:0.9em; color:#555;"><input id="toggle-cache" type="checkbox" checked style="margin-right:6px;">Cache Server</label>';
-    }
-    if (hasWorkerPhases) {
-        filterTogglesHtml += '<label style="font-size:0.9em; color:#555;"><input id="toggle-worker-wait" type="checkbox" checked style="margin-right:6px;">Worker Wait Blocks</label>';
-    }
-
-    // Create timeline HTML with filter toggles (only show if we have any toggles)
+    // Create timeline HTML with filter toggles
     let html = `
         <div style="margin-bottom: 10px; display:flex; flex-direction: column; gap:8px;">
             <div style="display:flex; justify-content:space-between; align-items: center;">
                 <h3 style="font-size: 1.8em; color: #667eea; margin: 0;">
                     Log Timeline
                 </h3>
-                ${filterTogglesHtml ? `<div style="display:flex; gap:12px; align-items:center;">${filterTogglesHtml}</div>` : ''}
+                <div style="display:flex; gap:12px; align-items:center;">
+                    <label style="font-size:0.9em; color:#555;"><input id="toggle-imports" type="checkbox" checked style="margin-right:6px;">Imports</label>
+                    <label style="font-size:0.9em; color:#555;"><input id="toggle-operations" type="checkbox" checked style="margin-right:6px;">Operations</label>
+                    <label style="font-size:0.9em; color:#555;"><input id="toggle-cache" type="checkbox" checked style="margin-right:6px;">Cache Server</label>
+                </div>
             </div>
             <p style="color: #666; font-size: 0.9em; margin: 0;">
                 Total time: ${formatTime(totalTime)} | Asset imports: ${formatTime(summary.asset_import_time_ms / 1000)} | Total imports: ${summary.total_imports || 0}
@@ -195,19 +178,6 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
         // Special styling for Pipeline Refresh operations
         // These are non-blocking container operations that overlap other operations
         const isPipelineRefresh = segment.operation_type === 'Asset Pipeline Refresh';
-        
-        // Special styling for Cache Server Download operations
-        const isCacheServerDownload = segment.phase === 'CacheServerDownload';
-        
-        // Debug logging for pipeline refresh styling
-        if (segment.operation_type && segment.operation_type.includes('Pipeline')) {
-            console.log('[Timeline] Process segment:', {
-                operation_type: segment.operation_type,
-                isPipelineRefresh: isPipelineRefresh,
-                phase: segment.phase,
-                description: segment.description
-            });
-        }
 
         let segmentOpacity = '1';
         let segmentBorder = 'none';  // Remove borders from inner elements to avoid conflicts
@@ -222,7 +192,7 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
         if (isPipelineRefresh) {
             const borderWidth = '2px';  // Reduced from 3px for less visual weight
             const borderStyle = `${borderWidth} dashed rgba(59, 130, 246, 0.8)`;
-            segmentOpacity = '0.125';  // Increased transparency by ~50%
+            segmentOpacity = '0.25';  // Semi-transparent background
 
             // Only show borders if the segment is wide enough to be visible
             // Skip borders for very thin operations (less than 0.5% of timeline width)
@@ -235,22 +205,6 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
 
             segmentZIndex = '0';  // Behind other operations
             segmentColor = '#3b82f6';  // Blue color for container
-        } else if (isCacheServerDownload) {
-            // Similar styling to pipeline refresh for cache server downloads
-            const borderWidth = '2px';
-            const borderStyle = `${borderWidth} dashed rgba(156, 39, 176, 0.8)`;  // Purple dashed border
-            segmentOpacity = '0.125';  // Semi-transparent background
-            
-            // Only show borders if the segment is wide enough to be visible
-            if (widthPercent >= 0.5) {
-                wrapperBorderTop = borderStyle;
-                wrapperBorderBottom = borderStyle;
-                wrapperBorderLeft = borderStyle;
-                wrapperBorderRight = borderStyle;
-            }
-            
-            segmentZIndex = '0';  // Behind other operations
-            segmentColor = '#9C27B0';  // Purple color for cache blocks
         } else {
             // Shrink non-pipeline items slightly to fit inside pipeline container
             // This creates visual nesting effect
@@ -266,7 +220,7 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
                         left: ${leftPercent}%; 
                         width: ${widthPercent}%; 
                         height: 100%; 
-                        cursor: grab;
+                        cursor: pointer;
                         z-index: ${segmentZIndex};
                         border-top: ${wrapperBorderTop};
                         border-bottom: ${wrapperBorderBottom};
@@ -358,12 +312,6 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
         const widthPercent = Math.max(0, Math.min(100, (phaseBlock.duration_ms / totalTimeMs) * 100));
         const leftPercent = Math.max(0, Math.min(100, (phaseBlock.start_time / totalTimeMs) * 100));
 
-        // Format the wait time for tooltip
-        const waitDurationSeconds = phaseBlock.duration_ms / 1000;
-        const formattedWaitTime = waitDurationSeconds >= 60 
-            ? `${Math.floor(waitDurationSeconds / 60)}m ${Math.floor(waitDurationSeconds % 60)}s`
-            : `${waitDurationSeconds.toFixed(2)}s`;
-
         html += `
             <div class="timeline-phase-overlay" 
                  style="position: absolute; 
@@ -377,7 +325,7 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
                         cursor: help;
                         z-index: 5;"
                  data-phase="Worker Wait"
-                 data-description="Mainthread waiting for worker thread completion (${formattedWaitTime})"
+                 data-description="Mainthread waiting for worker thread completion"
                  data-duration="${phaseBlock.duration_ms}"
                  onmouseover="showTimelineTooltip(event, this)"
                  onmouseout="hideTimelineTooltip()">
@@ -424,7 +372,7 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
                                 left: ${leftPercent}%; 
                                 width: ${widthPercent}%; 
                                 height: 100%; 
-                                cursor: grab;"
+                                cursor: pointer;"
                          data-phase="${segment.phase}"
                          data-description="${descriptionEscaped}"
                          data-duration="${segment.duration_ms}"
@@ -486,20 +434,20 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
     // Wire up timeline filter toggles
     try {
         const updateFilters = () => {
-            const showOperations = document.getElementById('toggle-operations')?.checked ?? false;
+            const showImports = document.getElementById('toggle-imports')?.checked ?? true;
+            const showOperations = document.getElementById('toggle-operations')?.checked ?? true;
             const showCache = document.getElementById('toggle-cache')?.checked ?? true;
-            const showWorkerWait = document.getElementById('toggle-worker-wait')?.checked ?? true;
 
             // All segment wrappers and overlays
             const wrappers = container.querySelectorAll('.timeline-segment-wrapper, .timeline-phase-overlay');
             wrappers.forEach(el => {
                 const phase = (el.getAttribute('data-phase') || '').trim();
 
-                const isOperation = phase === 'Operation'; // Only Asset Pipeline Refresh, not CompileScripts
+                const isImport = phase === 'AssetImports' || phase === 'WorkerImport';
+                const isOperation = phase === 'Operation' || phase === 'CompileScripts';
                 const isCache = phase === 'CacheServerDownload';
-                const isWorkerWait = phase === 'Worker Wait';
 
-                if ((isOperation && !showOperations) || (isCache && !showCache) || (isWorkerWait && !showWorkerWait)) {
+                if ((isImport && !showImports) || (isOperation && !showOperations) || (isCache && !showCache)) {
                     el.style.display = 'none';
                 } else {
                     el.style.display = '';
@@ -514,7 +462,7 @@ function renderTimelineVisualization(container, timelineData, categoryData = [])
             });
         };
 
-        ['toggle-operations', 'toggle-cache', 'toggle-worker-wait'].forEach(id => {
+        ['toggle-imports', 'toggle-operations', 'toggle-cache'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', updateFilters);
         });

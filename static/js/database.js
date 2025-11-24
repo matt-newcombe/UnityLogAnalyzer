@@ -13,7 +13,7 @@ const DB_NAME_PREFIX = 'UnityLogAnalyzer';
  */
 function getCurrentDbVersion() {
     const version = localStorage.getItem(DB_VERSION_KEY);
-    return version ? parseInt(version, 10) : 1;
+    return version ? parseInt(version, 10) : 2; // Default to version 2 for worker_thread_id support
 }
 
 /**
@@ -46,6 +46,45 @@ function getCurrentDbName() {
 }
 
 /**
+ * Detect the highest existing database version and sync localStorage
+ * This handles cases where localStorage is out of sync with actual IndexedDB databases
+ * @returns {Promise<number>} The highest database version found
+ */
+async function syncDatabaseVersion() {
+    const storedVersion = getCurrentDbVersion();
+    let highestVersion = storedVersion;
+
+    // Try to use indexedDB.databases() to list all databases (modern browsers)
+    if (indexedDB.databases) {
+        try {
+            const databases = await indexedDB.databases();
+            const dbNamePattern = new RegExp(`^${DB_NAME_PREFIX}_v(\\d+)$`);
+
+            // Find all databases matching our pattern
+            for (const dbInfo of databases) {
+                const match = dbInfo.name.match(dbNamePattern);
+                if (match) {
+                    const dbVersion = parseInt(match[1], 10);
+                    if (dbVersion > highestVersion) {
+                        highestVersion = dbVersion;
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn(`[Database] Could not list databases to sync version:`, error);
+        }
+    }
+
+    // Update localStorage if we found a higher version
+    if (highestVersion > storedVersion) {
+        console.log(`[Database] Syncing database version: localStorage had ${storedVersion}, found ${highestVersion} in IndexedDB. Updating localStorage.`);
+        localStorage.setItem(DB_VERSION_KEY, highestVersion.toString());
+    }
+
+    return highestVersion;
+}
+
+/**
  * Database class wrapper
  */
 class UnityLogDatabase {
@@ -59,107 +98,17 @@ class UnityLogDatabase {
     _initDatabase() {
         // Create Dexie database instance
         this.db = new Dexie(this.dbName);
-        
-        // Version 1: Initial schema
+
+        // Single version with final schema (no migrations needed - databases are regenerated)
         this.db.version(1).stores({
-            log_metadata: '++id, log_file, unity_version, platform, architecture, project_name, date_parsed, total_lines, total_parse_time_ms',
-            asset_imports: '++id, log_id, line_number, asset_path, asset_name, asset_type, asset_category, guid, artifact_id, importer_type, import_time_seconds, import_time_ms',
-            pipeline_refreshes: '++id, log_id, line_number, refresh_id, total_time_seconds, initiated_by, imports_total, imports_actual, asset_db_process_time_ms, asset_db_callback_time_ms, domain_reloads, domain_reload_time_ms, compile_time_ms, scripting_other_ms',
-            domain_reload_steps: '++id, log_id, line_number, parent_id, step_name, time_ms, indent_level',
-            script_compilation: '++id, log_id, line_number, assembly_path, defines_count, references_count',
-            telemetry_data: '++id, log_id, line_number, telemetry_type, json_data',
-            operations: '++id, log_id, line_number, operation_type, operation_name, duration_seconds, duration_ms, memory_mb',
-            log_lines: '++id, log_id, line_number, content, line_type, indent_level, is_error, is_warning, timestamp'
-        });
-
-        // Version 2: Add compound indexes for pre-sorted queries
-        // These indexes allow efficient sorted queries by type/category/importer
-        this.db.version(2).stores({
-            log_metadata: '++id, log_file, unity_version, platform, architecture, project_name, date_parsed, total_lines, total_parse_time_ms',
-            asset_imports: '++id, log_id, line_number, asset_path, asset_name, asset_type, asset_category, guid, artifact_id, importer_type, import_time_seconds, import_time_ms, [log_id+asset_type+import_time_ms], [log_id+asset_category+import_time_ms], [log_id+importer_type+import_time_ms], [log_id+import_time_ms]',
-            pipeline_refreshes: '++id, log_id, line_number, refresh_id, total_time_seconds, initiated_by, imports_total, imports_actual, asset_db_process_time_ms, asset_db_callback_time_ms, domain_reloads, domain_reload_time_ms, compile_time_ms, scripting_other_ms',
-            domain_reload_steps: '++id, log_id, line_number, parent_id, step_name, time_ms, indent_level',
-            script_compilation: '++id, log_id, line_number, assembly_path, defines_count, references_count',
-            telemetry_data: '++id, log_id, line_number, telemetry_type, json_data',
-            operations: '++id, log_id, line_number, operation_type, operation_name, duration_seconds, duration_ms, memory_mb',
-            log_lines: '++id, log_id, line_number, content, line_type, indent_level, is_error, is_warning, timestamp, [log_id+line_number]'
-        }).upgrade(async tx => {
-            // Migration: No data transformation needed, just adding indexes
-            // IndexedDB will automatically build the indexes from existing data
-        });
-
-        // Version 3: Add timestamps to operations table for wall-to-wall time calculation
-        this.db.version(3).stores({
-            log_metadata: '++id, log_file, unity_version, platform, architecture, project_name, date_parsed, total_lines, total_parse_time_ms',
-            asset_imports: '++id, log_id, line_number, asset_path, asset_name, asset_type, asset_category, guid, artifact_id, importer_type, import_time_seconds, import_time_ms, [log_id+asset_type+import_time_ms], [log_id+asset_category+import_time_ms], [log_id+importer_type+import_time_ms], [log_id+import_time_ms]',
-            pipeline_refreshes: '++id, log_id, line_number, refresh_id, total_time_seconds, initiated_by, imports_total, imports_actual, asset_db_process_time_ms, asset_db_callback_time_ms, domain_reloads, domain_reload_time_ms, compile_time_ms, scripting_other_ms',
-            domain_reload_steps: '++id, log_id, line_number, parent_id, step_name, time_ms, indent_level',
-            script_compilation: '++id, log_id, line_number, assembly_path, defines_count, references_count',
-            telemetry_data: '++id, log_id, line_number, telemetry_type, json_data',
-            operations: '++id, log_id, line_number, operation_type, operation_name, duration_seconds, duration_ms, memory_mb, start_timestamp, end_timestamp',
-            log_lines: '++id, log_id, line_number, content, line_type, indent_level, is_error, is_warning, timestamp, [log_id+line_number]'
-        }).upgrade(async tx => {
-            // Migration: No data transformation needed, just adding new fields
-            // Existing operations will have null timestamps
-        });
-
-        // Version 4: Add start_timestamp and end_timestamp to log_metadata for timeline sizing
-        this.db.version(4).stores({
-            log_metadata: '++id, log_file, unity_version, platform, architecture, project_name, date_parsed, total_lines, total_parse_time_ms, start_timestamp, end_timestamp',
-            asset_imports: '++id, log_id, line_number, asset_path, asset_name, asset_type, asset_category, guid, artifact_id, importer_type, import_time_seconds, import_time_ms, [log_id+asset_type+import_time_ms], [log_id+asset_category+import_time_ms], [log_id+importer_type+import_time_ms], [log_id+import_time_ms]',
-            pipeline_refreshes: '++id, log_id, line_number, refresh_id, total_time_seconds, initiated_by, imports_total, imports_actual, asset_db_process_time_ms, asset_db_callback_time_ms, domain_reloads, domain_reload_time_ms, compile_time_ms, scripting_other_ms',
-            domain_reload_steps: '++id, log_id, line_number, parent_id, step_name, time_ms, indent_level',
-            script_compilation: '++id, log_id, line_number, assembly_path, defines_count, references_count',
-            telemetry_data: '++id, log_id, line_number, telemetry_type, json_data',
-            operations: '++id, log_id, line_number, operation_type, operation_name, duration_seconds, duration_ms, memory_mb, start_timestamp, end_timestamp',
-            log_lines: '++id, log_id, line_number, content, line_type, indent_level, is_error, is_warning, timestamp, [log_id+line_number]'
-        }).upgrade(async tx => {
-            // Migration: No data transformation needed, just adding new fields
-            // Existing log_metadata will have null timestamps
-        });
-
-        // Version 5: Add start_timestamp and end_timestamp to asset_imports for direct storage during parsing
-        this.db.version(5).stores({
-            log_metadata: '++id, log_file, unity_version, platform, architecture, project_name, date_parsed, total_lines, total_parse_time_ms, start_timestamp, end_timestamp',
-            asset_imports: '++id, log_id, line_number, asset_path, asset_name, asset_type, asset_category, guid, artifact_id, importer_type, import_time_seconds, import_time_ms, start_timestamp, end_timestamp, [log_id+asset_type+import_time_ms], [log_id+asset_category+import_time_ms], [log_id+importer_type+import_time_ms], [log_id+import_time_ms]',
-            pipeline_refreshes: '++id, log_id, line_number, refresh_id, total_time_seconds, initiated_by, imports_total, imports_actual, asset_db_process_time_ms, asset_db_callback_time_ms, domain_reloads, domain_reload_time_ms, compile_time_ms, scripting_other_ms',
-            domain_reload_steps: '++id, log_id, line_number, parent_id, step_name, time_ms, indent_level',
-            script_compilation: '++id, log_id, line_number, assembly_path, defines_count, references_count',
-            telemetry_data: '++id, log_id, line_number, telemetry_type, json_data',
-            operations: '++id, log_id, line_number, operation_type, operation_name, duration_seconds, duration_ms, memory_mb, start_timestamp, end_timestamp',
-            log_lines: '++id, log_id, line_number, content, line_type, indent_level, is_error, is_warning, timestamp, [log_id+line_number]'
-        }).upgrade(async tx => {
-            // Migration: No data transformation needed, just adding new fields
-            // Existing asset_imports will have null timestamps
-        });
-
-        // Version 6: Add error_count and warning_count to log_metadata for fast error/warning retrieval
-        this.db.version(6).stores({
-            log_metadata: '++id, log_file, unity_version, platform, architecture, project_name, date_parsed, total_lines, total_parse_time_ms, start_timestamp, end_timestamp, error_count, warning_count',
-            asset_imports: '++id, log_id, line_number, asset_path, asset_name, asset_type, asset_category, guid, artifact_id, importer_type, import_time_seconds, import_time_ms, start_timestamp, end_timestamp, [log_id+asset_type+import_time_ms], [log_id+asset_category+import_time_ms], [log_id+importer_type+import_time_ms], [log_id+import_time_ms]',
-            pipeline_refreshes: '++id, log_id, line_number, refresh_id, total_time_seconds, initiated_by, imports_total, imports_actual, asset_db_process_time_ms, asset_db_callback_time_ms, domain_reloads, domain_reload_time_ms, compile_time_ms, scripting_other_ms',
-            domain_reload_steps: '++id, log_id, line_number, parent_id, step_name, time_ms, indent_level',
-            script_compilation: '++id, log_id, line_number, assembly_path, defines_count, references_count',
-            telemetry_data: '++id, log_id, line_number, telemetry_type, json_data',
-            operations: '++id, log_id, line_number, operation_type, operation_name, duration_seconds, duration_ms, memory_mb, start_timestamp, end_timestamp',
-            log_lines: '++id, log_id, line_number, content, line_type, indent_level, is_error, is_warning, timestamp, [log_id+line_number]'
-        }).upgrade(async tx => {
-            // Migration: Calculate error/warning counts from existing log_lines
-            // This ensures existing logs get their counts populated
-            const metadataRecords = await tx.table('log_metadata').toArray();
-            for (const meta of metadataRecords) {
-                if (meta.error_count === undefined || meta.warning_count === undefined) {
-                    const lines = await tx.table('log_lines')
-                        .where('log_id').equals(meta.id)
-                        .toArray();
-                    const errorCount = lines.filter(l => l.is_error === true || l.is_error === 1).length;
-                    const warningCount = lines.filter(l => l.is_warning === true || l.is_warning === 1).length;
-                    await tx.table('log_metadata').update(meta.id, {
-                        error_count: errorCount,
-                        warning_count: warningCount
-                    });
-                }
-            }
+            log_metadata: '++id, log_file, unity_version, platform, architecture, project_name, date_parsed, total_lines, total_parse_time_ms, start_timestamp, end_timestamp, last_processed_line, is_live_monitoring',
+            asset_imports: '++id, line_number, byte_offset, asset_path, asset_name, asset_type, asset_category, guid, importer_type, import_time_ms, duration_ms, start_timestamp, end_timestamp, worker_thread_id, [asset_type+import_time_ms], [asset_category+import_time_ms], [importer_type+import_time_ms], [worker_thread_id+start_timestamp]',
+            pipeline_refreshes: '++id, line_number, byte_offset, refresh_id, total_time_seconds, initiated_by, imports_total, imports_actual, asset_db_process_time_ms, asset_db_callback_time_ms, domain_reloads, domain_reload_time_ms, compile_time_ms, scripting_other_ms',
+            script_compilation: '++id, line_number, assembly_path, defines_count, references_count',
+            processes: '++id, line_number, byte_offset, process_type, process_name, duration_seconds, duration_ms, memory_mb, start_timestamp, end_timestamp',
+            parser_state: '++id, state_type, state_data',
+            cache_server_download_blocks: '++id, line_number, start_timestamp, end_timestamp, duration_seconds, duration_ms, num_assets_requested, num_assets_downloaded, downloaded_assets',
+            worker_thread_phases: '++id, worker_thread_id, start_timestamp, end_timestamp, duration_ms, import_count, start_line_number, [worker_thread_id+start_timestamp]'
         });
     }
 
@@ -171,7 +120,16 @@ class UnityLogDatabase {
             await this.db.open();
             return this.db;
         } catch (error) {
-            console.error('Failed to open database:', error);
+            // If database is being deleted/upgraded, wait a bit and retry
+            if (error.name === 'DatabaseClosedError' || error.message?.includes('Database has been closed')) {
+                // Wait a short time for database operations to complete
+                await new Promise(resolve => setTimeout(resolve, 100));
+                // Try to get a fresh database instance
+                const freshDb = await getCurrentDatabase();
+                this.db = freshDb.db;
+                await this.db.open();
+                return this.db;
+            }
             throw error;
         }
     }
@@ -181,7 +139,38 @@ class UnityLogDatabase {
      */
     async close() {
         if (this.db) {
-            await this.db.close();
+            try {
+                await this.db.close();
+            } catch (error) {
+                // Ignore errors when closing (database might already be closed)
+            }
+        }
+    }
+
+    /**
+     * Safely execute a database operation with error handling
+     * @private
+     */
+    async _safeDbOperation(operation) {
+        try {
+            await this.open();
+            return await operation();
+        } catch (error) {
+            // Handle database closed errors by retrying with a fresh connection
+            if (error.name === 'DatabaseClosedError' || error.message?.includes('Database has been closed')) {
+                try {
+                    // Get a fresh database instance
+                    const freshDb = await getCurrentDatabase();
+                    this.db = freshDb.db;
+                    await this.db.open();
+                    // Retry the operation
+                    return await operation();
+                } catch (retryError) {
+                    // If retry also fails, throw the original error
+                    throw error;
+                }
+            }
+            throw error;
         }
     }
 
@@ -204,15 +193,7 @@ class UnityLogDatabase {
     async getLogMetadata(logId) {
         await this.open();
         const metadata = await this.db.log_metadata.get(logId);
-        if (metadata) {
-            console.log(`[Database] Retrieved metadata for log ${logId}:`, {
-                hasStartTimestamp: !!metadata.start_timestamp,
-                hasEndTimestamp: !!metadata.end_timestamp,
-                startTimestamp: metadata.start_timestamp,
-                endTimestamp: metadata.end_timestamp,
-                totalLines: metadata.total_lines
-            });
-        } else {
+        if (!metadata) {
             console.warn(`[Database] No metadata found for log ${logId}`);
         }
         return metadata;
@@ -222,161 +203,157 @@ class UnityLogDatabase {
      * Get summary statistics for a log
      */
     async getSummary(logId) {
-        await this.open();
-        
-        const summary = {};
+        return await this._safeDbOperation(async () => {
+            const summary = {};
+            const assetImports = await this.db.asset_imports.toArray();
 
-        // Asset imports summary
-        const assetImports = await this.db.asset_imports
-            .where('log_id').equals(logId)
-            .toArray();
-        
-        if (assetImports.length > 0) {
-            const totalTime = assetImports.reduce((sum, a) => sum + (a.import_time_ms || 0), 0);
-            const avgTime = totalTime / assetImports.length;
-            const maxTime = Math.max(...assetImports.map(a => a.import_time_ms || 0));
-            
-            summary.asset_imports = {
-                count: assetImports.length,
-                total_time: totalTime,
-                avg_time: avgTime,
-                max_time: maxTime
+            // Debug: Log asset import data to diagnose chart issues
+            if (assetImports.length > 0) {
+                const sampleAsset = assetImports[0];
+                const missingCategory = assetImports.filter(a => !a.asset_category || a.asset_category === 'Other').length;
+                const missingType = assetImports.filter(a => !a.asset_type || a.asset_type === 'Unknown').length;
+                console.log(`[getSummary] Found ${assetImports.length} asset imports. Sample:`, {
+                    asset_category: sampleAsset.asset_category,
+                    asset_type: sampleAsset.asset_type,
+                    asset_path: sampleAsset.asset_path
+                });
+                if (missingCategory > 0 || missingType > 0) {
+                    console.warn(`[getSummary] ${missingCategory} assets missing category, ${missingType} missing type`);
+                }
+            }
+
+            if (assetImports.length > 0) {
+                // Use duration_ms field (calculated during parsing: wall time if available, else import_time_ms)
+                const totalTime = assetImports.reduce((sum, a) => sum + (a.duration_ms || 0), 0);
+                const avgTime = totalTime / assetImports.length;
+                const maxTime = Math.max(...assetImports.map(a => a.duration_ms || 0));
+
+                summary.asset_imports = {
+                    count: assetImports.length,
+                    total_time: totalTime,
+                    avg_time: avgTime,
+                    max_time: maxTime
+                };
+
+                // By category
+                const byCategory = {};
+                assetImports.forEach(asset => {
+                    const cat = asset.asset_category || 'Other';
+                    if (!byCategory[cat]) {
+                        byCategory[cat] = { count: 0, total_time: 0 };
+                    }
+                    byCategory[cat].count++;
+                    byCategory[cat].total_time += asset.duration_ms || 0;
+                });
+
+                summary.by_category = Object.entries(byCategory).map(([category, data]) => ({
+                    asset_category: category,
+                    count: data.count,
+                    total_time: data.total_time,
+                    avg_time: data.total_time / data.count
+                })).sort((a, b) => b.total_time - a.total_time);
+
+                // By type
+                const byType = {};
+                assetImports.forEach(asset => {
+                    const type = asset.asset_type || 'Unknown';
+                    if (!byType[type]) {
+                        byType[type] = { count: 0, total_time: 0 };
+                    }
+                    byType[type].count++;
+                    byType[type].total_time += asset.duration_ms || 0;
+                });
+                summary.by_type = Object.entries(byType).map(([type, data]) => ({
+                    asset_type: type,
+                    count: data.count,
+                    total_time: data.total_time,
+                    avg_time: data.total_time / data.count
+                })).sort((a, b) => b.total_time - a.total_time);
+
+                // By importer
+                const byImporter = {};
+                assetImports.forEach(asset => {
+                    const importer = asset.importer_type || 'Unknown';
+                    if (!byImporter[importer]) {
+                        byImporter[importer] = { count: 0, total_time: 0 };
+                    }
+                    byImporter[importer].count++;
+                    byImporter[importer].total_time += asset.duration_ms || 0;
+                });
+                summary.by_importer = Object.entries(byImporter).map(([importer, data]) => ({
+                    importer_type: importer,
+                    count: data.count,
+                    total_time: data.total_time,
+                    avg_time: data.total_time / data.count
+                })).sort((a, b) => b.total_time - a.total_time);
+            } else {
+                summary.asset_imports = {};
+                summary.by_category = [];
+                summary.by_type = [];
+                summary.by_importer = [];
+            }
+
+            // Pipeline refreshes
+            const refreshes = await this.db.pipeline_refreshes.toArray();
+
+            if (refreshes.length > 0) {
+                const totalTime = refreshes.reduce((sum, r) => sum + (r.total_time_seconds || 0), 0);
+                summary.pipeline_refreshes = {
+                    count: refreshes.length,
+                    total_time_seconds: totalTime
+                };
+            } else {
+                summary.pipeline_refreshes = {};
+            }
+
+            // Script compilation
+            const scriptCompOps = await this.db.processes
+                .filter(op => op.process_type === 'Script Compilation')
+                .toArray();
+
+            summary.script_compilation = {
+                count: scriptCompOps.length,
+                total_time_ms: scriptCompOps.reduce((sum, op) => sum + (op.duration_ms || 0), 0)
             };
 
-            // By category
-            const byCategory = {};
-            assetImports.forEach(asset => {
-                const cat = asset.asset_category || 'Other';
-                if (!byCategory[cat]) {
-                    byCategory[cat] = { count: 0, total_time: 0 };
-                }
-                byCategory[cat].count++;
-                byCategory[cat].total_time += asset.import_time_ms || 0;
-            });
-            
-            summary.by_category = Object.entries(byCategory).map(([category, data]) => ({
-                asset_category: category,
-                count: data.count,
-                total_time: data.total_time,
-                avg_time: data.total_time / data.count
-            })).sort((a, b) => b.total_time - a.total_time);
 
-            // By type
-            const byType = {};
-            assetImports.forEach(asset => {
-                const type = asset.asset_type || 'Unknown';
-                if (!byType[type]) {
-                    byType[type] = { count: 0, total_time: 0 };
-                }
-                byType[type].count++;
-                byType[type].total_time += asset.import_time_ms || 0;
-            });
-            summary.by_type = Object.entries(byType).map(([type, data]) => ({
-                asset_type: type,
-                count: data.count,
-                total_time: data.total_time,
-                avg_time: data.total_time / data.count
-            })).sort((a, b) => b.total_time - a.total_time);
+            // Get Unity version from metadata
+            const metadata = await this.getLogMetadata(logId);
+            summary.unity_version = metadata ? metadata.unity_version : null;
 
-            // By importer
-            const byImporter = {};
-            assetImports.forEach(asset => {
-                const importer = asset.importer_type || 'Unknown';
-                if (!byImporter[importer]) {
-                    byImporter[importer] = { count: 0, total_time: 0 };
-                }
-                byImporter[importer].count++;
-                byImporter[importer].total_time += asset.import_time_ms || 0;
-            });
-            summary.by_importer = Object.entries(byImporter).map(([importer, data]) => ({
-                importer_type: importer,
-                count: data.count,
-                total_time: data.total_time,
-                avg_time: data.total_time / data.count
-            })).sort((a, b) => b.total_time - a.total_time);
-        } else {
-            summary.asset_imports = {};
-            summary.by_category = [];
-            summary.by_type = [];
-            summary.by_importer = [];
-        }
+            // Project load time - will be calculated from log file or pipeline refresh
+            // For now, use the largest pipeline refresh total_time_seconds
+            if (refreshes.length > 0) {
+                const maxRefresh = refreshes.reduce((max, r) =>
+                    (r.total_time_seconds || 0) > (max.total_time_seconds || 0) ? r : max
+                );
+                summary.project_load_time_seconds = maxRefresh.total_time_seconds;
+            } else {
+                summary.project_load_time_seconds = null;
+            }
 
-        // Pipeline refreshes
-        const refreshes = await this.db.pipeline_refreshes
-            .where('log_id').equals(logId)
-            .toArray();
-        
-        if (refreshes.length > 0) {
-            const totalTime = refreshes.reduce((sum, r) => sum + (r.total_time_seconds || 0), 0);
-            summary.pipeline_refreshes = {
-                count: refreshes.length,
-                total_time_seconds: totalTime
-            };
-        } else {
-            summary.pipeline_refreshes = {};
-        }
-
-        // Script compilation - now calculated from Tundra operations
-        const tundraOps = await this.db.operations
-            .where('log_id').equals(logId)
-            .filter(op => op.operation_type === 'Tundra')
-            .toArray();
-        
-        summary.script_compilation = {
-            count: tundraOps.length,
-            total_time_ms: tundraOps.reduce((sum, op) => sum + (op.duration_ms || 0), 0)
-        };
-
-        // Telemetry
-        const telemetry = await this.db.telemetry_data
-            .where('log_id').equals(logId)
-            .toArray();
-        
-        summary.telemetry = telemetry.map(t => ({
-            telemetry_type: t.telemetry_type,
-            json_data: t.json_data
-        }));
-
-        // Get Unity version from metadata
-        const metadata = await this.getLogMetadata(logId);
-        summary.unity_version = metadata ? metadata.unity_version : null;
-
-        // Project load time - will be calculated from log file or pipeline refresh
-        // For now, use the largest pipeline refresh total_time_seconds
-        if (refreshes.length > 0) {
-            const maxRefresh = refreshes.reduce((max, r) => 
-                (r.total_time_seconds || 0) > (max.total_time_seconds || 0) ? r : max
-            );
-            summary.project_load_time_seconds = maxRefresh.total_time_seconds;
-        } else {
-            summary.project_load_time_seconds = null;
-        }
-
-        return summary;
+            return summary;
+        });
     }
 
     /**
-     * Get all assets for a log (sorted by import_time_ms using compound index)
+     * Get all assets for a log (sorted by import_time_ms)
      */
     async getAssets(logId) {
         await this.open();
-        // Use compound index [log_id+import_time_ms] for sorted results
-        const assets = await this.db.asset_imports
-            .where('[log_id+import_time_ms]')
-            .between([logId, Dexie.minKey], [logId, Dexie.maxKey])
-            .toArray();
-        return assets;
+        const assets = await this.db.asset_imports.toArray();
+        // Sort by import_time_ms
+        return assets.sort((a, b) => (a.import_time_ms || 0) - (b.import_time_ms || 0));
     }
 
     /**
-     * Get assets by category (sorted by import_time_ms using compound index)
+     * Get assets by category (sorted by import_time_ms)
      */
     async getAssetsByCategory(logId, category) {
         await this.open();
-        // Use compound index [log_id+asset_category+import_time_ms] for sorted results
         const assets = await this.db.asset_imports
-            .where('[log_id+asset_category+import_time_ms]')
-            .between([logId, category, Dexie.minKey], [logId, category, Dexie.maxKey])
+            .where('[asset_category+import_time_ms]')
+            .between([category, Dexie.minKey], [category, Dexie.maxKey])
             .toArray();
         return assets;
     }
@@ -387,67 +364,66 @@ class UnityLogDatabase {
      */
     async getAssetsByType(logId, assetType, limit = null) {
         await this.open();
-        // Use compound index [log_id+asset_type+import_time_ms] for sorted results
-        // Query on first two fields, results are automatically sorted by third field
+        // Use compound index [asset_type+import_time_ms] for sorted results
         let query = this.db.asset_imports
-            .where('[log_id+asset_type+import_time_ms]')
-            .between([logId, assetType, Dexie.minKey], [logId, assetType, Dexie.maxKey]);
-        
+            .where('[asset_type+import_time_ms]')
+            .between([assetType, Dexie.minKey], [assetType, Dexie.maxKey]);
+
         if (limit !== null && limit > 0) {
             // Use limit() for efficient pagination - only loads what we need!
             return await query.limit(limit).toArray();
         }
-        
+
         return await query.toArray();
     }
-    
+
     /**
      * Get assets by type progressively, yielding batches via callback
      * Now uses compound index for efficient sorted queries with true pagination
      */
     async getAssetsByTypeProgressive(logId, assetType, batchCallback, batchSize = 200) {
         await this.open();
-        
+
         // Use compound index for sorted iteration
         // Count total first for progress tracking
         let totalCount = 0;
         await this.db.asset_imports
-            .where('[log_id+asset_type+import_time_ms]')
-            .between([logId, assetType, Dexie.minKey], [logId, assetType, Dexie.maxKey])
+            .where('[asset_type+import_time_ms]')
+            .between([assetType, Dexie.minKey], [assetType, Dexie.maxKey])
             .each(() => { totalCount++; });
-        
+
         // Load first batch immediately using limit (most efficient)
         let offset = 0;
         let allAssets = [];
-        
+
         while (offset < totalCount) {
             // Load one batch at a time - compound index ensures sorted results
             const batch = await this.db.asset_imports
-                .where('[log_id+asset_type+import_time_ms]')
-                .between([logId, assetType, Dexie.minKey], [logId, assetType, Dexie.maxKey])
+                .where('[asset_type+import_time_ms]')
+                .between([assetType, Dexie.minKey], [assetType, Dexie.maxKey])
                 .offset(offset)
                 .limit(batchSize)
                 .toArray();
-            
+
             if (batch.length === 0) break;
-            
+
             allAssets.push(...batch);
             const isLast = (offset + batch.length) >= totalCount;
-            
+
             // Yield batch immediately (async callback)
             await batchCallback(batch, offset, totalCount, isLast);
-            
+
             offset += batch.length;
-            
+
             // Yield to event loop between batches for UI responsiveness
             if (!isLast) {
                 await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
-        
+
         return allAssets;
     }
-    
+
     /**
      * Get count of assets by type (optimized using compound index)
      */
@@ -456,8 +432,8 @@ class UnityLogDatabase {
         let count = 0;
         // Use compound index for efficient counting
         await this.db.asset_imports
-            .where('[log_id+asset_type+import_time_ms]')
-            .between([logId, assetType, Dexie.minKey], [logId, assetType, Dexie.maxKey])
+            .where('[asset_type+import_time_ms]')
+            .between([assetType, Dexie.minKey], [assetType, Dexie.maxKey])
             .each(() => { count++; });
         return count;
     }
@@ -467,28 +443,23 @@ class UnityLogDatabase {
      */
     async getAssetsByImporter(logId, importerType) {
         await this.open();
-        // Use compound index [log_id+importer_type+import_time_ms] for sorted results
         const assets = await this.db.asset_imports
-            .where('[log_id+importer_type+import_time_ms]')
-            .between([logId, importerType, Dexie.minKey], [logId, importerType, Dexie.maxKey])
+            .where('[importer_type+import_time_ms]')
+            .between([importerType, Dexie.minKey], [importerType, Dexie.maxKey])
             .toArray();
         return assets;
     }
 
     /**
-     * Get top slowest assets (sorted descending by import_time_ms using compound index)
+     * Get top slowest assets (sorted descending by import_time_ms)
      */
     async getTopSlowest(logId, limit = 20) {
         await this.open();
-        // Use compound index [log_id+import_time_ms] and reverse to get slowest first
-        // Then take only the first N items for efficiency
-        const assets = await this.db.asset_imports
-            .where('[log_id+import_time_ms]')
-            .between([logId, Dexie.minKey], [logId, Dexie.maxKey])
-            .reverse()
-            .limit(limit)
-            .toArray();
-        return assets;
+        const assets = await this.db.asset_imports.toArray();
+        // Sort by import_time_ms descending and take top N
+        return assets
+            .sort((a, b) => (b.import_time_ms || 0) - (a.import_time_ms || 0))
+            .slice(0, limit);
     }
 
     /**
@@ -496,9 +467,7 @@ class UnityLogDatabase {
      */
     async getPipelineRefreshes(logId) {
         await this.open();
-        const refreshes = await this.db.pipeline_refreshes
-            .where('log_id').equals(logId)
-            .toArray();
+        const refreshes = await this.db.pipeline_refreshes.toArray();
         return refreshes.sort((a, b) => (a.total_time_seconds || 0) - (b.total_time_seconds || 0));
     }
 
@@ -507,19 +476,16 @@ class UnityLogDatabase {
      */
     async getPipelineBreakdown(logId) {
         await this.open();
-        const refreshes = await this.db.pipeline_refreshes
-            .where('log_id').equals(logId)
+        const refreshes = await this.db.pipeline_refreshes.toArray();
+
+        // Get Script Compilation processes
+        const scriptCompOps = await this.db.processes
+            .filter(op => op.process_type === 'Script Compilation')
             .toArray();
-        
-        // Get Script Compilation operations
-        const scriptCompOps = await this.db.operations
-            .where('log_id').equals(logId)
-            .filter(op => op.operation_type === 'Script Compilation')
-            .toArray();
-        
+
         // Sum Script Compilation operation times
         const totalCompile = scriptCompOps.reduce((sum, op) => sum + (op.duration_ms || 0), 0);
-        
+
         const breakdown = refreshes.reduce((acc, r) => ({
             total_asset_db_process: (acc.total_asset_db_process || 0) + (r.asset_db_process_time_ms || 0),
             total_asset_db_callback: (acc.total_asset_db_callback || 0) + (r.asset_db_callback_time_ms || 0),
@@ -532,19 +498,17 @@ class UnityLogDatabase {
     }
 
     /**
-     * Get operations breakdown by type for the operations widget
+     * Get processes breakdown by type for the processes widget
      */
-    async getOperationsBreakdown(logId) {
+    async getProcessesBreakdown(logId) {
         await this.open();
-        
-        const operations = await this.db.operations
-            .where('log_id').equals(logId)
-            .toArray();
-        
-        // Group by operation_type and sum durations
+
+        const processes = await this.db.processes.toArray();
+
+        // Group by process_type and sum durations
         const breakdown = {};
-        operations.forEach(op => {
-            const type = op.operation_type || 'Unknown';
+        processes.forEach(op => {
+            const type = op.process_type || 'Unknown';
             if (!breakdown[type]) {
                 breakdown[type] = {
                     type: type,
@@ -555,76 +519,39 @@ class UnityLogDatabase {
             breakdown[type].count++;
             breakdown[type].total_time_ms += (op.duration_ms || 0);
         });
-        
+
         // Convert to array and sort by total time
         return Object.values(breakdown).sort((a, b) => b.total_time_ms - a.total_time_ms);
     }
 
     /**
-     * Get operations by type
+     * Get processes by type
      */
-    async getOperationsByType(operationType, logId) {
+    async getProcessesByType(processType, logId) {
         await this.open();
-        const operations = await this.db.operations
-            .where('log_id').equals(logId)
-            .filter(op => op.operation_type === operationType)
+        const processes = await this.db.processes
+            .filter(op => op.process_type === processType)
             .toArray();
-        
+
         // Sort by line_number
-        return operations.sort((a, b) => (a.line_number || 0) - (b.line_number || 0));
+        return processes.sort((a, b) => (a.line_number || 0) - (b.line_number || 0));
     }
 
     /**
-     * Get script compilation data (now returns Tundra operations)
+     * Get script compilation data
      */
     async getScriptCompilation(logId) {
         await this.open();
-        // Return Tundra operations as script compilation
-        const tundraOps = await this.db.operations
-            .where('log_id').equals(logId)
-            .filter(op => op.operation_type === 'Tundra')
+        const scriptCompOps = await this.db.processes
+            .filter(op => op.process_type === 'Script Compilation')
             .toArray();
-        return tundraOps.sort((a, b) => (a.line_number || 0) - (b.line_number || 0));
+        return scriptCompOps.sort((a, b) => (a.line_number || 0) - (b.line_number || 0));
     }
 
     /**
      * Get error and warning counts
      * Now reads from log_metadata for fast retrieval (counters are maintained during parsing)
      */
-    async getErrorWarningCounts(logId) {
-        await this.open();
-        const metadata = await this.db.log_metadata.get(logId);
-        
-        // If metadata exists and has counts, use them (fast path)
-        if (metadata && metadata.error_count !== undefined && metadata.warning_count !== undefined) {
-            return {
-                errors: metadata.error_count || 0,
-                warnings: metadata.warning_count || 0
-            };
-        }
-        
-        // Fallback: if metadata doesn't exist or doesn't have counts (old logs), calculate from log_lines
-        // This should rarely happen after migration, but ensures backward compatibility
-        const lines = await this.db.log_lines
-            .where('log_id').equals(logId)
-            .toArray();
-        
-        const errorCount = lines.filter(l => l.is_error === true || l.is_error === 1).length;
-        const warningCount = lines.filter(l => l.is_warning === true || l.is_warning === 1).length;
-
-        // If metadata exists but counts were missing, update it for next time
-        if (metadata && (metadata.error_count === undefined || metadata.warning_count === undefined)) {
-            await this.db.log_metadata.update(logId, {
-                error_count: errorCount,
-                warning_count: warningCount
-            });
-        }
-
-        return {
-            errors: errorCount,
-            warnings: warningCount
-        };
-    }
 
     /**
      * Get log lines for viewer
@@ -638,15 +565,19 @@ class UnityLogDatabase {
 
     /**
      * Get single log line
+     * Now reads from file using line index
      */
     async getLogLine(logId, lineNumber) {
         await this.open();
-        const lines = await this.db.log_lines
-            .where('log_id').equals(logId)
-            .filter(line => line.line_number === lineNumber)
-            .toArray();
-        
-        return lines.length > 0 ? lines[0] : null;
+        const query = new LogLinesQuery(this.db, logId);
+        const result = await query.query({ center_line: lineNumber });
+
+        if (result.lines && result.lines.length > 0) {
+            // Find the exact line number (should be the center line)
+            return result.lines.find(line => line.line_number === lineNumber) || result.lines[0];
+        }
+
+        return null;
     }
 
     /**
@@ -654,10 +585,8 @@ class UnityLogDatabase {
      */
     async getFolderAnalysis(logId) {
         await this.open();
-        const assets = await this.db.asset_imports
-            .where('log_id').equals(logId)
-            .toArray();
-        
+        const assets = await this.db.asset_imports.toArray();
+
         const folderTimes = {};
         const folderCounts = {};
         const folderAssets = {};
@@ -666,7 +595,7 @@ class UnityLogDatabase {
             const path = asset.asset_path || '';
             const timeMs = asset.import_time_ms || 0;
             const parts = path.split('/');
-            
+
             let folder;
             if (parts.length >= 4) {
                 folder = parts.slice(0, 4).join('/');
@@ -710,10 +639,46 @@ class UnityLogDatabase {
      * Delegates to TimelineBuilder for complex timeline construction
      */
     async getTimeline(logId) {
-        await this.open();
-        const builder = new TimelineBuilder(this.db, logId);
-        return await builder.build();
+        return await this._safeDbOperation(async () => {
+            const builder = new TimelineBuilder(this.db, logId);
+            return await builder.build();
+        });
     }
+
+    /**
+     * Get worker thread timeline data
+     * Returns operations grouped by worker thread ID
+     */
+    async getWorkerThreadTimeline(logId) {
+        return await this._safeDbOperation(async () => {
+            // Query all worker thread imports (where worker_thread_id is not null)
+            const workerImports = await this.db.asset_imports
+                .filter(asset => asset.worker_thread_id !== null && asset.worker_thread_id !== undefined)
+                .toArray();
+
+            // Group by worker_thread_id
+            const workerThreads = {};
+            workerImports.forEach(asset => {
+                const workerId = asset.worker_thread_id;
+                if (!workerThreads[workerId]) {
+                    workerThreads[workerId] = [];
+                }
+                workerThreads[workerId].push(asset);
+            });
+
+            // Sort each worker's operations by start_timestamp
+            Object.keys(workerThreads).forEach(workerId => {
+                workerThreads[workerId].sort((a, b) => {
+                    const aTime = a.start_timestamp ? new Date(a.start_timestamp).getTime() : 0;
+                    const bTime = b.start_timestamp ? new Date(b.start_timestamp).getTime() : 0;
+                    return aTime - bTime;
+                });
+            });
+
+            return { workerThreads };
+        });
+    }
+
 
     /**
      * Bulk insert methods for parsing
@@ -724,30 +689,75 @@ class UnityLogDatabase {
         return id;
     }
 
-    async bulkInsertAssetImports(imports) {
+    async bulkInsertAssetImports(imports, progressCallback = null, cancelSignal = null) {
         await this.open();
-        
-        try {
-            await this.db.asset_imports.bulkAdd(imports);
-        } catch (error) {
-            console.error(`[Database] bulkInsertAssetImports: Error inserting imports:`, error);
-            // If bulkAdd fails due to duplicates, try individual inserts
-            if (error.name === 'ConstraintError') {
-                console.warn(`[Database] bulkInsertAssetImports: Constraint error, attempting individual inserts...`);
-                let successCount = 0;
-                let failCount = 0;
-                for (const imp of imports) {
-                    try {
-                        await this.db.asset_imports.add(imp);
-                        successCount++;
-                    } catch (e) {
-                        failCount++;
-                        console.warn(`[Database] Failed to insert asset import:`, imp, e);
+        // Insert in batches to avoid memory issues and provide progress updates
+        const batchSize = 1000;
+        const totalBatches = Math.ceil(imports.length / batchSize);
+
+        // Timing for first 3 batches to estimate remaining time
+        const batchTimes = [];
+        const startTime = performance.now();
+
+        for (let i = 0; i < imports.length; i += batchSize) {
+            // Check for cancellation
+            if (cancelSignal && cancelSignal.cancelled) {
+                throw new Error('Batch storage cancelled by user');
+            }
+
+            const batchStartTime = performance.now();
+            const batch = imports.slice(i, i + batchSize);
+
+            try {
+                await this.db.asset_imports.bulkAdd(batch);
+            } catch (error) {
+                console.error(`[Database] bulkInsertAssetImports: Error inserting batch:`, error);
+                // If bulkAdd fails due to duplicates, try individual inserts
+                if (error.name === 'ConstraintError') {
+                    console.warn(`[Database] bulkInsertAssetImports: Constraint error, attempting individual inserts...`);
+                    let successCount = 0;
+                    let failCount = 0;
+                    for (const imp of batch) {
+                        try {
+                            await this.db.asset_imports.add(imp);
+                            successCount++;
+                        } catch (e) {
+                            failCount++;
+                            console.warn(`[Database] Failed to insert asset import:`, imp, e);
+                        }
                     }
+                } else {
+                    throw error;
                 }
-                console.log(`[Database] bulkInsertAssetImports: Individual inserts - ${successCount} succeeded, ${failCount} failed`);
-            } else {
-                throw error;
+            }
+
+            const batchEndTime = performance.now();
+            const batchTime = batchEndTime - batchStartTime;
+
+            const batchNum = Math.floor(i / batchSize) + 1;
+
+            // Track timing for first 3 batches
+            if (batchNum <= 3) {
+                batchTimes.push(batchTime);
+            }
+
+            // Call progress callback if provided
+            if (progressCallback) {
+                const processed = i + batch.length;
+                const percent = (processed / imports.length) * 100;
+
+                // Calculate estimated time remaining after first 3 batches
+                let estimatedTimeRemaining = null;
+                if (batchNum >= 3 && batchTimes.length === 3) {
+                    const avgBatchTime = batchTimes.reduce((sum, t) => sum + t, 0) / batchTimes.length;
+                    const remainingBatches = totalBatches - batchNum;
+                    estimatedTimeRemaining = (remainingBatches * avgBatchTime) / 1000; // Convert to seconds
+                } else if (batchNum < 3) {
+                    // Still calculating
+                    estimatedTimeRemaining = -1;
+                }
+
+                progressCallback(batchNum, totalBatches, processed, imports.length, percent, estimatedTimeRemaining);
             }
         }
     }
@@ -767,64 +777,41 @@ class UnityLogDatabase {
         await this.db.script_compilation.bulkAdd(compilations);
     }
 
-    async bulkInsertTelemetryData(telemetry) {
+
+    async bulkInsertProcesses(processes) {
         await this.open();
-        await this.db.telemetry_data.bulkAdd(telemetry);
+        await this.db.processes.bulkAdd(processes);
     }
 
-    async bulkInsertOperations(operations) {
+    async bulkInsertLineIndex(indexEntries) {
         await this.open();
-        await this.db.operations.bulkAdd(operations);
+        // Insert in batches to avoid memory issues
+        const batchSize = 10000;
+        const totalBatches = Math.ceil(indexEntries.length / batchSize);
+
+        for (let i = 0; i < totalBatches; i++) {
+            const start = i * batchSize;
+            const end = Math.min(start + batchSize, indexEntries.length);
+            const batch = indexEntries.slice(start, end);
+            await this.db.line_index.bulkAdd(batch);
+        }
+    }
+
+    async bulkInsertCacheServerBlocks(blocks) {
+        await this.open();
+        // Delete existing blocks to avoid duplicates when re-parsing
+        await this.db.cache_server_download_blocks.clear();
+        await this.db.cache_server_download_blocks.bulkAdd(blocks);
     }
 
     async bulkInsertLogLines(lines, progressCallback = null, cancelSignal = null) {
-        await this.open();
-        // Insert in batches to avoid memory issues
-        const batchSize = 1000;
-        const totalBatches = Math.ceil(lines.length / batchSize);
-        
-        // Timing for first 3 batches to estimate remaining time
-        const batchTimes = [];
-        const startTime = performance.now();
-        
-        for (let i = 0; i < lines.length; i += batchSize) {
-            // Check for cancellation
-            if (cancelSignal && cancelSignal.cancelled) {
-                throw new Error('Batch storage cancelled by user');
-            }
-            
-            const batchStartTime = performance.now();
-            const batch = lines.slice(i, i + batchSize);
-            await this.db.log_lines.bulkAdd(batch);
-            const batchEndTime = performance.now();
-            const batchTime = batchEndTime - batchStartTime;
-            
-            const batchNum = Math.floor(i / batchSize) + 1;
-            
-            // Track timing for first 3 batches
-            if (batchNum <= 3) {
-                batchTimes.push(batchTime);
-            }
-            
-            // Call progress callback if provided
-            if (progressCallback) {
-                const processed = i + batch.length;
-                const percent = (processed / lines.length) * 100;
-                
-                // Calculate estimated time remaining after first 3 batches
-                let estimatedTimeRemaining = null;
-                if (batchNum >= 3 && batchTimes.length === 3) {
-                    const avgBatchTime = batchTimes.reduce((sum, t) => sum + t, 0) / batchTimes.length;
-                    const remainingBatches = totalBatches - batchNum;
-                    estimatedTimeRemaining = (remainingBatches * avgBatchTime) / 1000; // Convert to seconds
-                } else if (batchNum < 3) {
-                    // Still calculating
-                    estimatedTimeRemaining = -1;
-                }
-                
-                progressCallback(batchNum, totalBatches, processed, lines.length, percent, estimatedTimeRemaining);
-            }
+        // Log lines are no longer stored in database - they're read from file on demand
+        // This method is kept for backward compatibility but does nothing
+        if (progressCallback) {
+            progressCallback(0, 1, 0, lines.length, 100, 0);
         }
+        // No database operation - log lines are read from file
+        return;
     }
 
     /**
@@ -833,7 +820,7 @@ class UnityLogDatabase {
     _calculateObjectSize(obj) {
         let size = 0;
         const visited = new WeakSet();
-        
+
         function calculate(obj) {
             if (obj === null || obj === undefined) return 0;
             if (typeof obj === 'boolean') return 4;
@@ -842,7 +829,7 @@ class UnityLogDatabase {
             if (typeof obj === 'function') return 0; // Functions don't count
             if (visited.has(obj)) return 0; // Avoid circular references
             if (obj instanceof Date) return 8;
-            
+
             if (Array.isArray(obj)) {
                 visited.add(obj);
                 size = 0;
@@ -851,7 +838,7 @@ class UnityLogDatabase {
                 }
                 return size;
             }
-            
+
             if (typeof obj === 'object') {
                 visited.add(obj);
                 size = 0;
@@ -863,10 +850,10 @@ class UnityLogDatabase {
                 }
                 return size;
             }
-            
+
             return 0;
         }
-        
+
         return calculate(obj);
     }
 
@@ -878,51 +865,44 @@ class UnityLogDatabase {
         try {
             await this.open();
             let totalSize = 0;
-            
+
             // Calculate actual size of stored data
             const metadata = await this.db.log_metadata.toArray();
             metadata.forEach(record => {
                 totalSize += this._calculateObjectSize(record);
             });
-            
+
             const assets = await this.db.asset_imports.toArray();
             assets.forEach(record => {
                 totalSize += this._calculateObjectSize(record);
             });
-            
+
             const refreshes = await this.db.pipeline_refreshes.toArray();
             refreshes.forEach(record => {
                 totalSize += this._calculateObjectSize(record);
             });
-            
+
             const steps = await this.db.domain_reload_steps.toArray();
             steps.forEach(record => {
                 totalSize += this._calculateObjectSize(record);
             });
-            
+
             const compilations = await this.db.script_compilation.toArray();
             compilations.forEach(record => {
                 totalSize += this._calculateObjectSize(record);
             });
-            
-            const telemetry = await this.db.telemetry_data.toArray();
-            telemetry.forEach(record => {
+
+
+            const processes = await this.db.processes.toArray();
+            processes.forEach(record => {
                 totalSize += this._calculateObjectSize(record);
             });
-            
-            const operations = await this.db.operations.toArray();
-            operations.forEach(record => {
-                totalSize += this._calculateObjectSize(record);
-            });
-            
-            const logLines = await this.db.log_lines.toArray();
-            logLines.forEach(record => {
-                totalSize += this._calculateObjectSize(record);
-            });
-            
+
+            // Log lines are no longer stored in database - they're read from file on demand
+
             // Add IndexedDB overhead (indexes, structure, etc.) - roughly 30% overhead
             totalSize = totalSize * 1.3;
-            
+
             return totalSize;
         } catch (error) {
             console.warn('Could not calculate database size:', error);
@@ -937,6 +917,64 @@ class UnityLogDatabase {
         const sizeBytes = await this.getDatabaseSize();
         return sizeBytes / (1024 * 1024); // Convert to MB
     }
+
+    /**
+     * Save parser state for multi-line message handling
+     */
+    async saveParserState(logId, stateType, stateData) {
+        await this.open();
+        // Remove existing state of this type
+        await this.db.parser_state
+            .filter(state => state.state_type === stateType)
+            .delete();
+        // Insert new state
+        await this.db.parser_state.add({
+            state_type: stateType,
+            state_data: JSON.stringify(stateData)
+        });
+    }
+
+    /**
+     * Load parser state for multi-line message handling
+     */
+    async loadParserState(logId, stateType) {
+        await this.open();
+        const state = await this.db.parser_state
+            .filter(s => s.state_type === stateType)
+            .first();
+        if (state) {
+            return JSON.parse(state.state_data);
+        }
+        return null;
+    }
+
+    /**
+     * Clear all parser state for a log
+     */
+    async clearParserState(logId) {
+        await this.open();
+        await this.db.parser_state.clear();
+    }
+
+    /**
+     * Set live monitoring flag for a log
+     */
+    async setLiveMonitoring(logId, isMonitoring) {
+        await this.open();
+        await this.db.log_metadata.update(logId, {
+            is_live_monitoring: isMonitoring
+        });
+    }
+
+    /**
+     * Update last processed line for a log
+     */
+    async updateLastProcessedLine(logId, lineNumber) {
+        await this.open();
+        await this.db.log_metadata.update(logId, {
+            last_processed_line: lineNumber
+        });
+    }
 }
 
 /**
@@ -946,30 +984,28 @@ class UnityLogDatabase {
  * @param {number} currentVersion - The current database version to keep
  */
 async function cleanupOldDatabases(currentVersion) {
-    console.log(`[Database] Cleaning up old databases (keeping version ${currentVersion})...`);
-    
+
     const currentDbName = getDbName(currentVersion);
     const deletePromises = [];
-    
+
     // Try to use indexedDB.databases() to list all databases (modern browsers)
     if (indexedDB.databases) {
         try {
             const databases = await indexedDB.databases();
             const dbNamePattern = new RegExp(`^${DB_NAME_PREFIX}_v(\\d+)$`);
-            
+
             // Find all databases matching our pattern
             for (const dbInfo of databases) {
                 const match = dbInfo.name.match(dbNamePattern);
                 if (match) {
                     const dbVersion = parseInt(match[1], 10);
                     const dbName = dbInfo.name;
-                    
+
                     // Delete if it's not the current version
                     if (dbVersion !== currentVersion) {
                         deletePromises.push(
                             Dexie.delete(dbName)
                                 .then(() => {
-                                    console.log(`[Database] Deleted old database: ${dbName} (version ${dbVersion})`);
                                 })
                                 .catch(error => {
                                     // Database might be in use - that's okay
@@ -986,17 +1022,15 @@ async function cleanupOldDatabases(currentVersion) {
             // Fall through to fallback method
         }
     }
-    
+
     // Fallback: If databases() is not available or failed, try known version numbers
     // This ensures compatibility with older browsers
     if (deletePromises.length === 0) {
-        console.log(`[Database] Using fallback method: trying versions 1 to ${currentVersion - 1}`);
         for (let oldVersion = 1; oldVersion < currentVersion; oldVersion++) {
             const oldDbName = getDbName(oldVersion);
             deletePromises.push(
                 Dexie.delete(oldDbName)
                     .then(() => {
-                        console.log(`[Database] Deleted old database: ${oldDbName}`);
                     })
                     .catch(error => {
                         // Database might not exist or might be in use - that's okay
@@ -1007,13 +1041,10 @@ async function cleanupOldDatabases(currentVersion) {
             );
         }
     }
-    
+
     // Wait for all deletions to complete (or fail gracefully)
     if (deletePromises.length > 0) {
         await Promise.allSettled(deletePromises);
-        console.log(`[Database] Cleanup complete`);
-    } else {
-        console.log(`[Database] No old databases found to clean up`);
     }
 }
 
@@ -1023,21 +1054,27 @@ async function cleanupOldDatabases(currentVersion) {
  * @returns {Promise<UnityLogDatabase>} New database instance
  */
 async function createNewDatabase() {
+    // Sync version first to ensure we're working with the correct base version
+    await syncDatabaseVersion();
+
     const oldVersion = getCurrentDbVersion();
     const version = getNextDbVersion();
-    
+
     // Clean up old databases before creating the new one
     // This keeps only the most recent database
     await cleanupOldDatabases(version);
-    
+
     return new UnityLogDatabase(version);
 }
 
 /**
  * Get the current active database
- * @returns {UnityLogDatabase} Current database instance
+ * Syncs the database version with IndexedDB before returning
+ * @returns {Promise<UnityLogDatabase>} Current database instance
  */
-function getCurrentDatabase() {
+async function getCurrentDatabase() {
+    // Sync version with existing databases to handle version mismatches
+    await syncDatabaseVersion();
     return new UnityLogDatabase();
 }
 
@@ -1046,4 +1083,5 @@ window.UnityLogDatabase = UnityLogDatabase;
 window.createNewDatabase = createNewDatabase;
 window.getCurrentDatabase = getCurrentDatabase;
 window.getCurrentDbVersion = getCurrentDbVersion;
+window.syncDatabaseVersion = syncDatabaseVersion;
 

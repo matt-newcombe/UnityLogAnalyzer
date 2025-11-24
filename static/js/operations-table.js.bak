@@ -106,13 +106,13 @@ async function displayOperationsTable(operations, title) {
                 endTime = endDate.toLocaleTimeString();
             }
             
-            const operationType = op.process_type || 'Unknown';
-            const operationName = (op.process_name || 'N/A').replace(/"/g, '&quot;');
+            const operationType = op.operation_type || 'Unknown';
+            const operationName = (op.operation_name || 'N/A').replace(/"/g, '&quot;');
             
             return `
                 <tr data-line="${op.line_number}" 
                     onclick="openLogViewer(${op.line_number})"
-                    style="cursor: grab; border-bottom: 1px solid #eee;">
+                    style="cursor: pointer; border-bottom: 1px solid #eee;">
                     <td style="font-size: 0.85em; padding: 10px;">
                         <a href="javascript:void(0)" 
                            style="color: #667eea; font-weight: 600; text-decoration: none;"

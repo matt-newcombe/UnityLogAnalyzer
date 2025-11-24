@@ -153,20 +153,20 @@ class APIClient {
         }
     }
 
-    async getProcessesBreakdown() {
+    async getOperationsBreakdown() {
         try {
             const db = await this.getDatabase();
-            return await db.getProcessesBreakdown(this.currentLogId);
+            return await db.getOperationsBreakdown(this.currentLogId);
         } catch (error) {
             console.error('Error getting operations breakdown:', error);
             throw error;
         }
     }
 
-    async getProcessesByType(processType) {
+    async getOperationsByType(operationType) {
         try {
             const db = await this.getDatabase();
-            return await db.getProcessesByType(processType, this.currentLogId);
+            return await db.getOperationsByType(operationType, this.currentLogId);
         } catch (error) {
             console.error('Error getting operations by type:', error);
             throw error;

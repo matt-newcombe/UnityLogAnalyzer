@@ -89,7 +89,7 @@
             background: #2d2d2d;
             color: white;
             border-radius: 5px;
-            cursor: pointer;
+            cursor: grab;
             font-size: 13px;
             transition: all 0.2s;
         }
@@ -135,7 +135,7 @@
             text-align: right;
             user-select: none;
             padding-right: 15px;
-            cursor: pointer;
+            cursor: grab;
         }
         
         .line-number:hover {
@@ -225,8 +225,6 @@
                 </div>
                 <div class="filter-buttons">
                     <button class="filter-btn active" data-filter="all">All</button>
-                    <button class="filter-btn" data-filter="error">Errors</button>
-                    <button class="filter-btn" data-filter="warning">Warnings</button>
                     <button class="filter-btn" data-filter="import">Imports</button>
                     <button class="filter-btn" data-filter="pipeline">Pipeline</button>
                 </div>
@@ -249,6 +247,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+    <script src="static/js/category-colors.js"></script>
     <script src="static/js/database-timeline.js"></script>
     <script src="static/js/database-log-lines.js"></script>
     <script src="static/js/database.js"></script>
@@ -490,13 +489,7 @@
             // Apply current filter
             let displayedLines = allLines;
             if (currentFilter !== 'all') {
-                if (currentFilter === 'error') {
-                    displayedLines = allLines.filter(line => line.is_error);
-                } else if (currentFilter === 'warning') {
-                    displayedLines = allLines.filter(line => line.is_warning);
-                } else {
-                    displayedLines = allLines.filter(line => line.line_type === currentFilter);
-                }
+                displayedLines = allLines.filter(line => line.line_type === currentFilter);
             }
             
             if (isSearchMode) {
@@ -513,14 +506,13 @@
             
             container.innerHTML = displayedLines.map(line => {
                 const isHighlighted = highlightLine && line.line_number == highlightLine;
-                const indentClass = line.indent_level > 0 ? `indent-${Math.min(line.indent_level, 5)}` : '';
                 // Strip trailing newlines from content
                 const content = line.content.replace(/\n+$/, '');
                 
                 return `
-                    <div class="log-line ${line.line_type} ${isHighlighted ? 'highlighted' : ''} ${indentClass}" 
+                    <div class="log-line ${line.line_type} ${isHighlighted ? 'highlighted' : ''}" 
                          data-line="${line.line_number}">
-                        <span class="line-number" onclick="handleLineNumberClick(${line.line_number})" style="cursor: pointer;">${line.line_number}</span>
+                        <span class="line-number" onclick="handleLineNumberClick(${line.line_number})" style="cursor: grab;">${line.line_number}</span>
                         <div class="line-content">
                             ${line.timestamp ? `<span class="timestamp">${line.timestamp}</span>` : ''}
                             ${escapeHtml(content)}

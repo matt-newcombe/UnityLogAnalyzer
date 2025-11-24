@@ -119,14 +119,14 @@
             }
         }
 
-        async function loadOperationsByType(processType) {
+        async function loadOperationsByType(operationType) {
             setCurrentView('operations');
-            currentFilter = processType;
+            currentFilter = operationType;
             
             try {
-                const operations = await window.apiClient.getProcessesByType(processType);
+                const operations = await window.apiClient.getOperationsByType(operationType);
                 
-                displayOperationsTable(operations, `${processType} Operations`);
+                displayOperationsTable(operations, `${operationType} Operations`);
             } catch (error) {
                 showError('Failed to load operations: ' + error.message);
             }

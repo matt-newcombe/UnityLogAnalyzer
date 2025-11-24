@@ -228,7 +228,7 @@
         }
         
         tbody tr {
-            cursor: pointer;
+            cursor: grab;
             box-sizing: border-box;
         }
         
@@ -297,7 +297,7 @@
         
         .context-menu-item {
             padding: 8px 16px;
-            cursor: pointer;
+            cursor: grab;
             font-size: 13px;
             color: #333;
         }
@@ -306,12 +306,6 @@
             background: #f0f0f0;
         }
         
-        .loading {
-            text-align: center;
-            padding: 50px;
-            color: #333;
-            font-size: 1.5em;
-        }
         
         /* Log Viewer Overlay */
         .log-viewer-overlay {
@@ -375,7 +369,7 @@
             width: 36px;
             height: 36px;
             border-radius: 6px;
-            cursor: pointer;
+            cursor: grab;
             font-size: 20px;
             display: flex;
             align-items: center;
@@ -423,7 +417,7 @@
             background: #2d2d2d;
             color: white;
             border-radius: 5px;
-            cursor: pointer;
+            cursor: grab;
             font-size: 13px;
             transition: all 0.2s;
         }
@@ -553,21 +547,6 @@
             to { transform: rotate(360deg); }
         }
         
-        #loading-progress {
-            margin-top: 20px;
-            font-size: 0.75em;
-            color: #333;
-            max-height: 400px;
-            overflow-y: auto;
-            text-align: left;
-            background: rgba(0, 0, 0, 0.05);
-            padding: 15px;
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            white-space: pre-wrap;
-            width: 100%;
-            box-sizing: border-box;
-        }
         
         .error:not(.log-viewer-line) {
             background: #ff4444;
@@ -598,7 +577,7 @@
         }
         
         .clickable {
-            cursor: pointer;
+            cursor: grab;
         }
         
         .back-button {
@@ -615,4 +594,141 @@
         
         .back-button:hover {
             transform: translateX(-5px);
+        }
+        
+        .action-buttons-bar {
+            background: transparent;
+            padding: 0;
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .action-buttons-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .action-btn {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            cursor: grab;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            font-family: inherit;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        
+        .action-btn:hover {
+            background: #f8f9fa;
+            border-color: #d0d0d0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+            transform: translateY(-1px);
+        }
+        
+        .action-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        
+        .action-btn-primary {
+            background: #4DB8A3;
+            color: white;
+            border-color: #4DB8A3;
+        }
+        
+        .action-btn-primary:hover {
+            background: #3DA793;
+            border-color: #3DA793;
+        }
+        
+        .action-btn-secondary {
+            background: #5A8FC7;
+            color: white;
+            border-color: #5A8FC7;
+        }
+        
+        .action-btn-secondary:hover {
+            background: #4A7FB7;
+            border-color: #4A7FB7;
+        }
+        
+        .action-btn-danger {
+            background: #E07A7A;
+            color: white;
+            border-color: #E07A7A;
+        }
+        
+        .action-btn-danger:hover {
+            background: #D06A6A;
+            border-color: #D06A6A;
+        }
+        
+        .action-btn-warning {
+            background: #F0C066;
+            color: white;
+            border-color: #F0C066;
+        }
+        
+        .action-btn-warning:hover {
+            background: #E0B056;
+            border-color: #E0B056;
+        }
+        
+        .action-btn-info {
+            background: #6B9DD4;
+            color: white;
+            border-color: #6B9DD4;
+        }
+        
+        .action-btn-info:hover {
+            background: #5B8DC4;
+            border-color: #5B8DC4;
+        }
+        
+        .monitoring-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 16px;
+            background: #e8f5e9;
+            border-radius: 8px;
+            font-size: 0.85em;
+        }
+        
+        .monitoring-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .monitoring-light {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4CAF50;
+            animation: pulse 2s infinite;
+        }
+        
+        .monitoring-path {
+            color: #2e7d32;
+            font-weight: 500;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
         }
