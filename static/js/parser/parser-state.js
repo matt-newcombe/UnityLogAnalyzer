@@ -21,14 +21,15 @@ export class ParserState {
             projectName: null
         };
 
-        // Worker threads state: map of workerId -> { assetPath, guid, startTime, ... }
-        this.workerStates = {};
+        // Worker thread process state: map of threadId -> { assetPath, guid, startTime, ... }
+        this.workerThreadStates = {};
 
-        // Worker phase state: map of workerId -> { start_timestamp, import_count, active, start_line_number }
-        this.workerPhases = {};
+        // Active worker threads: map of threadId -> { start_timestamp, import_count, start_line_number }
+        // Each entry represents a worker thread barrier period where main thread is blocked
+        this.workerThreads = {};
 
-        // Pending worker phases (waiting for end timestamp)
-        this.pendingWorkerPhases = {};
+        // Pending worker threads (waiting for end timestamp)
+        this.pendingWorkerThreads = {};
 
         // Pending imports (main thread): map of guid -> { assetPath, startTime, ... }
         this.pendingImports = {};
@@ -48,9 +49,9 @@ export class ParserState {
         // Script Compilation state
         this.scriptCompilationState = null;
 
-        // Cache Server block state
-        this.cacheServerBlock = null;
-        this.cacheServerAssetMap = {};
+        // Accelerator block state
+        this.acceleratorBlock = null;
+        this.acceleratorAssetMap = {};
 
         // Timestamp tracking
         this.firstTimestamp = null;
@@ -68,13 +69,9 @@ export class ParserState {
         // For Worker Threads: See threadLocalTimes
         this.logCurrentTime = '2000-01-01T00:00:00.000Z';
 
-        // Thread Local Times: map of workerId -> ISO timestamp string
+        // Thread Local Times: map of threadId -> ISO timestamp string
         // Tracks the local time cursor for each worker thread
         this.threadLocalTimes = {};
-
-        // Track if we've seen significant activity (database entries) since last worker line
-        // Used to determine if worker phases should be finalized or resumed
-        this.hasActivitySinceWorker = false;
     }
 
     updateTimestamps(timestamp) {
@@ -95,13 +92,13 @@ export class ParserState {
                 this.threadLocalTimes[k] = timestamp;
             });
 
-            // Also ensure any active worker phases get their local cursor advanced
-            Object.keys(this.workerPhases || {}).forEach(k => {
+            // Also ensure any active worker threads get their local cursor advanced
+            Object.keys(this.workerThreads || {}).forEach(k => {
                 this.threadLocalTimes[k] = timestamp;
             });
 
-            // And pending worker phases
-            Object.keys(this.pendingWorkerPhases || {}).forEach(k => {
+            // And pending worker threads
+            Object.keys(this.pendingWorkerThreads || {}).forEach(k => {
                 this.threadLocalTimes[k] = timestamp;
             });
         } catch (e) {

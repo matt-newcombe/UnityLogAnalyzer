@@ -141,6 +141,26 @@ export function calculateWallTime(startTimestamp, endTimestamp, explicitTimeSeco
 }
 
 /**
+ * Fill in missing timestamps when one timestamp and duration are known
+ */
+export function fillMissingTimestamps(startTimestamp, endTimestamp, explicitTimeSeconds) {
+    let calculatedStart = startTimestamp;
+    let calculatedEnd = endTimestamp;
+
+    if (!calculatedStart && calculatedEnd) {
+        const endTime = new Date(calculatedEnd).getTime();
+        calculatedStart = new Date(endTime - (explicitTimeSeconds * 1000)).toISOString();
+    }
+
+    if (!calculatedEnd && calculatedStart) {
+        const startTime = new Date(calculatedStart).getTime();
+        calculatedEnd = new Date(startTime + (explicitTimeSeconds * 1000)).toISOString();
+    }
+
+    return { startTimestamp: calculatedStart, endTimestamp: calculatedEnd };
+}
+
+/**
  * Create asset import object
  */
 export function createAssetImport({
@@ -176,7 +196,12 @@ export function createAssetImport({
     // Calculate end timestamp if not provided
     if (!endTimestamp && startTimestamp) {
         const startTime = new Date(startTimestamp).getTime();
-        endTimestamp = new Date(startTime + timeMs).toISOString();
+        if (!isNaN(startTime) && timeMs && !isNaN(timeMs)) {
+            const endTime = startTime + timeMs;
+            if (!isNaN(endTime)) {
+                endTimestamp = new Date(endTime).toISOString();
+            }
+        }
     }
 
     // Calculate duration_ms

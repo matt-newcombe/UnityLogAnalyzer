@@ -61,7 +61,7 @@ export const LogPatterns = {
     ScriptCompilationBee: /@Library\/Bee\/artifacts\/[^\/]+\/([^\.]+)\.rsp/,
     ScriptCompilationTime: /script compilation time:\s*([\d.]+)\s*s/i,
 
-    // Cache Server
-    CacheServerQuery: /Querying for cacheable assets in Cache Server:/,
-    CacheServerArtifact: /Artifact/, // Simple check
+    // Accelerator (Unity Cache Server)
+    AcceleratorQuery: /Querying for cacheable assets in Cache Server:/,
+    AcceleratorArtifact: /Artifact/, // Simple check
 };

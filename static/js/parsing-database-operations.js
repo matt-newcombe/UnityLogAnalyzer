@@ -19,7 +19,7 @@ class ParsingDatabaseOperations {
                 pipelineRefreshes: [],
                 processes: [],
                 operations: [],
-                cacheServerBlocks: [],
+                acceleratorBlocks: [],
                 logLines: [],
                 workerPhases: []
             };
@@ -76,11 +76,11 @@ class ParsingDatabaseOperations {
 
 
     /**
-     * Add a cache server block (collect or write immediately)
+     * Add an accelerator block (collect or write immediately)
      */
-    async addCacheServerBlock(block) {
+    async addAcceleratorBlock(block) {
         if (!this.isLiveFileWatching && this.collectArrays) {
-            this.collectArrays.cacheServerBlocks.push(block);
+            this.collectArrays.acceleratorBlocks.push(block);
         } else {
             await this.db.open();
             await this.db.db.cache_server_download_blocks.add(block);
@@ -103,13 +103,13 @@ class ParsingDatabaseOperations {
     }
 
     /**
-     * Update a cache server block (only for immediate writes, not collected)
+     * Update an accelerator block (only for immediate writes, not collected)
      */
-    async updateCacheServerBlock(blockId, updates) {
+    async updateAcceleratorBlock(blockId, updates) {
         if (!this.isLiveFileWatching) {
             // For collected blocks, we'll update them in the array before batch insert
             // This method is only called for immediate writes
-            throw new Error('updateCacheServerBlock should not be called in batch collection mode');
+            throw new Error('updateAcceleratorBlock should not be called in batch collection mode');
         } else {
             await this.db.open();
             await this.db.db.cache_server_download_blocks.update(blockId, updates);
@@ -182,10 +182,10 @@ class ParsingDatabaseOperations {
 
 
 
-        // Store cache server blocks
-        if (collectArrays.cacheServerBlocks && collectArrays.cacheServerBlocks.length > 0) {
-            this._reportProgress(`Storing ${collectArrays.cacheServerBlocks.length} cache server blocks...`);
-            await this.db.bulkInsertCacheServerBlocks(collectArrays.cacheServerBlocks);
+        // Store accelerator blocks
+        if (collectArrays.acceleratorBlocks && collectArrays.acceleratorBlocks.length > 0) {
+            this._reportProgress(`Storing ${collectArrays.acceleratorBlocks.length} accelerator blocks...`);
+            await this.db.bulkInsertCacheServerBlocks(collectArrays.acceleratorBlocks);
         }
 
         // Store worker phases

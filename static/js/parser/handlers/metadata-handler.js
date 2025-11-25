@@ -4,7 +4,7 @@ import { getFilename } from '../utils.js';
 export class MetadataHandler {
     constructor() { }
 
-    async handle(contentLine, line, lineNumber, logId, timestamp, state, databaseOps, stored) {
+    async handle(contentLine, line, lineNumber, logId, timestamp, state, databaseOps) {
         // Check if we are in metadata section
         if (!state.metadataState.inMetadata) {
             // If we haven't started metadata yet, and this is the first line (or close to it)
@@ -71,7 +71,7 @@ export class MetadataHandler {
                 contentLine.includes('[Worker') ||
                 contentLine.includes('Asset Pipeline Refresh')) {
 
-                await this._finalizeMetadata(logId, lineNumber, timestamp, state, databaseOps, stored);
+                await this._finalizeMetadata(logId, lineNumber, timestamp, state, databaseOps);
 
                 // If we stopped because of Start importing, Worker, or Pipeline Refresh, we should return false so other handlers can process this line
                 if (contentLine.includes('Start importing') ||
@@ -89,7 +89,7 @@ export class MetadataHandler {
         return false;
     }
 
-    async _finalizeMetadata(logId, lineNumber, timestamp, state, databaseOps, stored) {
+    async _finalizeMetadata(logId, lineNumber, timestamp, state, databaseOps) {
         state.metadataState.inMetadata = false;
         state.metadataState.endLine = lineNumber;
         state.metadataState.endTime = timestamp;
@@ -134,6 +134,5 @@ export class MetadataHandler {
         if (state.metadataState.endTime) state.trackTimestampRange(state.metadataState.endTime);
 
         await databaseOps.addProcess(operation);
-        stored.operation = true;
     }
 }

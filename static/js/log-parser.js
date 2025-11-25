@@ -9,11 +9,11 @@ import { ParserState } from './parser/parser-state.js';
 import { LogStreamProcessor } from './parser/log-stream-processor.js';
 import { TimelineNormalizer } from './timeline-normalizer.js';
 import {
-    WorkerHandler,
+    WorkerThreadHandler,
     AssetHandler,
     PipelineHandler,
     ScriptCompilationHandler,
-    CacheServerHandler,
+    AcceleratorHandler,
     SpriteAtlasHandler,
     MetadataHandler
 } from './parser/handlers/index.js';
@@ -45,11 +45,11 @@ class UnityLogParser {
 
         // Initialize handlers
         this.metadataHandler = new MetadataHandler();
-        this.workerHandler = new WorkerHandler();
+        this.workerThreadBarrierHandler = new WorkerThreadHandler();
         this.assetHandler = new AssetHandler();
         this.pipelineHandler = new PipelineHandler();
         this.scriptCompilationHandler = new ScriptCompilationHandler();
-        this.cacheServerHandler = new CacheServerHandler();
+        this.acceleratorHandler = new AcceleratorHandler();
 
         // Initialize asset mappings (needed for SpriteAtlasHandler)
         this._initAssetMappings();
@@ -215,7 +215,7 @@ class UnityLogParser {
             dbOps = new ParsingDatabaseOperations(this.db, true, onProgress || this.progressCallback);
         }
 
-        const stored = await this.processAndStoreLine(line, lineNumber, logId, parserState, {
+        await this.processAndStoreLine(line, lineNumber, logId, parserState, {
             timestampsEnabled: finalTimestampsEnabled,
             onProgress: onProgress,
             dbOps: dbOps,
@@ -251,8 +251,6 @@ class UnityLogParser {
                 }
             }
         }
-
-        return stored;
     }
 
     /**
@@ -334,12 +332,12 @@ class UnityLogParser {
         await this._processFileStreaming(file, processLineCallback, readingProgressCallback, cancelSignal);
 
         // Finalize cache server block
-        if (parserState.cacheServerBlock) {
-            await this.cacheServerHandler._finalizeCacheServerBlock(parserState.cacheServerBlock, logId, parserState.lastTimestamp, dbOps);
+        if (parserState.acceleratorBlock) {
+            await this.acceleratorHandler._finalizeBlock(parserState.acceleratorBlock, parserState.lastTimestamp, dbOps);
         }
 
-        // Finalize any active worker phases
-        await this.workerHandler.endPhase(parserState.lastTimestamp, parserState, dbOps, logId);
+        // Join any active worker thread barriers
+        await this.workerThreadBarrierHandler.joinBarriers(parserState.lastTimestamp, parserState, dbOps, logId);
 
         // Execute batch operations with storage progress callback
         await dbOps.executeBatchOperations(cancelSignal, storageProgressCallback);
@@ -378,7 +376,7 @@ class UnityLogParser {
             assetImports: [],
             pipelineRefreshes: [],
             operations: [],
-            cacheServerBlocks: []
+            acceleratorBlocks: []
         };
     }
 
@@ -433,12 +431,12 @@ class UnityLogParser {
 
             await this._processFileStreaming(file, processLine, readingProgressCallback, cancelSignal);
 
-            if (parserState.cacheServerBlock) {
-                await this.cacheServerHandler._finalizeCacheServerBlock(parserState.cacheServerBlock, logId, parserState.lastTimestamp, databaseOps);
+            if (parserState.acceleratorBlock) {
+                await this.acceleratorHandler._finalizeBlock(parserState.acceleratorBlock, parserState.lastTimestamp, databaseOps);
             }
 
-            // Finalize any active worker phases
-            await this.workerHandler.endPhase(parserState.lastTimestamp, parserState, databaseOps, logId);
+            // Join any active worker thread barriers
+            await this.workerThreadBarrierHandler.joinBarriers(parserState.lastTimestamp, parserState, databaseOps, logId);
 
             // Update metadata
             await this.db.open();
@@ -481,7 +479,7 @@ class UnityLogParser {
                 assetImports: collectArrays ? collectArrays.assetImports : [],
                 pipelineRefreshes: collectArrays ? collectArrays.pipelineRefreshes : [],
                 operations: collectArrays ? collectArrays.operations : [],
-                cacheServerBlocks: collectArrays ? collectArrays.cacheServerBlocks : []
+                acceleratorBlocks: collectArrays ? collectArrays.acceleratorBlocks : []
             };
         } catch (error) {
             console.error('[Parser] Error during parsing:', error);
@@ -515,228 +513,58 @@ class UnityLogParser {
             }
         }
 
-        const stored = {
-            assetImport: false,
-            pipelineRefresh: false,
-            operation: false,
-            logLine: false
-        };
-
-        // -------------------------------------------------------------------------
-        // OPTIMIZED ROUTER LOGIC
-        // Instead of trying every handler sequentially (which incurs Promise overhead),
-        // we use fast string checks to route to the correct handler.
-        // -------------------------------------------------------------------------
-
-        // 1. Metadata Handler (High priority, only active at start)
-        // Only check if we haven't found the end time yet (optimization)
         if (!parserState.metadataState.endTime) {
-            if (await this.metadataHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps, stored)) {
-                return stored;
+            if (await this.metadataHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps)) {
+                return;
             }
         }
 
-        // 2. Worker Thread Handler (Fast Path)
-        // Worker lines always start with "[Worker"
-        if (contentLine.startsWith('[Worker')) {
-            const isWorker = await this.workerHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps, stored);
-            if (isWorker) {
-                // Worker line detected - clear the activity flag since we're back in worker mode
-                parserState.hasActivitySinceWorker = false;
-                return stored;
+        if (WorkerThreadHandler.shouldHandle(contentLine)) {
+            if (await this.workerThreadBarrierHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps)) {
+                return;
             }
         }
 
-        // -------------------------------------------------------------------------
-        // WORKER PHASE MANAGEMENT (Optimized)
-        // -------------------------------------------------------------------------
+        await this.workerThreadBarrierHandler.handlePendingThreads(timestamp, parserState, dbOps, logId);
 
-        // If we have pending worker phases, and this line has a timestamp, finalize them.
-        // Optimization: Check if object has keys without creating array
-        let hasPendingPhases = false;
-        for (const _ in parserState.pendingWorkerPhases) { hasPendingPhases = true; break; }
-
-        if (timestamp && hasPendingPhases) {
-            for (const threadId in parserState.pendingWorkerPhases) {
-                const pendingPhase = parserState.pendingWorkerPhases[threadId];
-                await this.workerHandler.finalizePhase(parseInt(threadId), pendingPhase, timestamp, dbOps, logId, parserState);
-            }
-            parserState.pendingWorkerPhases = {};
+        // Check if we should join active worker barriers (non-worker line encountered)
+        const shouldSkipLine = await this.workerThreadBarrierHandler.handleNonWorkerLine(contentLine, timestamp, parserState, dbOps, logId);
+        if (shouldSkipLine) {
+            return; // Ignorable line - skip further processing
         }
 
-        // Check for active worker phases
-        // Optimization: Avoid Object.keys().filter() which allocates arrays on every line
-        let hasActiveWorkers = false;
-        for (const id in parserState.workerPhases) {
-            if (parserState.workerPhases[id].active) {
-                hasActiveWorkers = true;
-                break;
+        // Check if we should finalize active cache server block (non-cache line encountered)
+        await this.acceleratorHandler.handleNonAcceleratorLine(contentLine, parserState, logId, dbOps);
+
+        if (PipelineHandler.shouldHandle(contentLine, parserState)) {
+            if (await this.pipelineHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps)) {
+                return;
             }
         }
 
-        if (hasActiveWorkers) {
-            if (timestamp) {
-                // We have a timestamp, end all phases immediately
-                await this.workerHandler.endPhase(timestamp, parserState, dbOps, logId);
-            } else {
-                // No timestamp on this line
-                // For non-timestamped logs, only finalize if we've seen significant activity
-                // If no activity, just pause the phases (they'll resume when worker lines return)
-                if (!parserState.timestampsEnabled) {
-                    if (parserState.hasActivitySinceWorker) {
-                        // Significant activity detected - finalize the phases
-                        await this.workerHandler.endPhase(parserState.logCurrentTime, parserState, dbOps, logId);
-                    } else {
-                        // No significant activity - just pause (mark inactive but don't finalize)
-                        // Phases will resume when next worker line appears
-                        // Capture the threadLocalTime at pause so we can use it later for finalization
-                        let maxWorkerTime = null;
-
-                        // Iterate directly over phases to find active ones
-                        for (const threadId in parserState.workerPhases) {
-                            if (parserState.workerPhases[threadId].active) {
-                                parserState.workerPhases[threadId].active = false;
-                                const workerTime = parserState.threadLocalTimes[threadId];
-                                parserState.workerPhases[threadId].pausedAt = workerTime;
-
-                                // Track the maximum worker time
-                                if (workerTime && (!maxWorkerTime || new Date(workerTime).getTime() > new Date(maxWorkerTime).getTime())) {
-                                    maxWorkerTime = workerTime;
-                                }
-                            }
-                        }
-
-                        // Advance logCurrentTime to match the maximum worker time
-                        // This ensures subsequent main thread activity gets correct timestamps
-                        if (maxWorkerTime) {
-                            const currentMs = new Date(parserState.logCurrentTime).getTime();
-                            const maxWorkerMs = new Date(maxWorkerTime).getTime();
-                            if (maxWorkerMs > currentMs) {
-                                parserState.logCurrentTime = maxWorkerTime;
-                            }
-                        }
-                    }
-                } else {
-                    // For timestamped logs, defer completion until we see the next timestamp
-                    for (const threadId in parserState.workerPhases) {
-                        if (parserState.workerPhases[threadId].active) {
-                            parserState.workerPhases[threadId].active = false;
-                            parserState.pendingWorkerPhases[threadId] = parserState.workerPhases[threadId];
-                        }
-                    }
-                    parserState.workerPhases = {};
-                }
+        if (AcceleratorHandler.shouldHandle(contentLine, parserState)) {
+            if (await this.acceleratorHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps)) {
+                return;
             }
         }
 
-        // -------------------------------------------------------------------------
-        // HANDLER DISPATCH (Routed)
-        // -------------------------------------------------------------------------
-
-        // Cache Server Block Management
-        // Check if this line starts a new cache server block
-        const isCacheBlockStart = contentLine.includes('Querying for cacheable assets in Cache Server:');
-        
-        // If starting a new cache block, finalize any active OR pending worker phases first
-        // Cache server operations happen on the main thread, so workers must end
-        if (isCacheBlockStart) {
-            let hasWorkerPhases = false;
-            
-            // Check for active phases
-            for (const id in parserState.workerPhases) {
-                if (parserState.workerPhases[id].active) {
-                    hasWorkerPhases = true;
-                    break;
-                }
-            }
-            
-            // Check for pending phases
-            if (!hasWorkerPhases) {
-                for (const id in parserState.pendingWorkerPhases) {
-                    hasWorkerPhases = true;
-                    break;
-                }
-            }
-            
-            if (hasWorkerPhases) {
-                // Don't pass timestamp - let endPhase calculate from worker local times
-                // and update logCurrentTime so the cache block gets the correct start time
-                await this.workerHandler.endPhase(null, parserState, dbOps, logId);
-            }
-        }
-        
-        // If we have an active cache block, check if this line should end it
-        if (parserState.cacheServerBlock) {
-            // Update last_timestamp to track end of block
-            parserState.cacheServerBlock.last_timestamp = parserState.logCurrentTime;
-            
-            // Check if this line is cache-related content
-            const isCacheContent = contentLine.startsWith('\t') || 
-                                   (contentLine.includes('Artifact') && 
-                                    (contentLine.includes('downloaded for') || contentLine.includes('uploaded to cacheserver')));
-            
-            // If this line is NOT cache-related, finalize the current block
-            if (!isCacheBlockStart && !isCacheContent) {
-                await this.cacheServerHandler._finalizeCacheServerBlock(
-                    parserState.cacheServerBlock, 
-                    logId, 
-                    parserState.cacheServerBlock.last_timestamp, 
-                    dbOps
-                );
-                parserState.cacheServerBlock = null;
+        if (SpriteAtlasHandler.shouldHandle(contentLine, parserState)) {
+            if (await this.spriteAtlasHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps)) {
+                return;
             }
         }
 
-        // 3. Pipeline Handler
-        // Check state or start pattern
-        if (parserState.pipelineRefreshState.inPipelineRefresh || contentLine.includes('Asset Pipeline Refresh')) {
-            if (await this.pipelineHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps, stored)) {
-                if (stored.operation) parserState.hasActivitySinceWorker = true;
-                return stored;
+        if (AssetHandler.shouldHandle(contentLine)) {
+            if (await this.assetHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps)) {
+                return;
             }
         }
 
-
-
-        // 5. Cache Server Handler
-        // Check state or start patterns
-        if (parserState.cacheServerBlock || contentLine.includes('Querying for cacheable assets') || (contentLine.includes('Artifact') && (contentLine.includes('downloaded for') || contentLine.includes('uploaded to')))) {
-            if (await this.cacheServerHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps, stored)) {
-                if (stored.cacheServerBlock || stored.assetImport) parserState.hasActivitySinceWorker = true;
-                return stored;
+        if (ScriptCompilationHandler.shouldHandle(contentLine, parserState)) {
+            if (await this.scriptCompilationHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps)) {
+                return;
             }
         }
-
-        // 6. Sprite Atlas Handler
-        // Check state or start patterns
-        if (parserState.spriteAtlasState || (contentLine.includes('Start importing') && contentLine.includes('.spriteatlasv2')) || contentLine.includes('Processing Atlas') || contentLine.includes('Sprite Atlas Operation')) {
-            if (await this.spriteAtlasHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps, stored)) {
-                if (stored.operation) parserState.hasActivitySinceWorker = true;
-                return stored;
-            }
-        }
-
-        // 7. Asset Handler
-        // Check common patterns
-        if (contentLine.includes('Start importing') || contentLine.includes('-> (artifact id:') || contentLine.includes('Keyframe reduction:')) {
-            if (await this.assetHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps, stored)) {
-                if (stored.assetImport) parserState.hasActivitySinceWorker = true;
-                return stored;
-            }
-        }
-
-
-
-        // 9. Script Compilation Handler
-        // Check keywords
-        if (contentLine.includes('script compilation') || parserState.scriptCompilationState || contentLine.includes('[ScriptCompilation]') || (contentLine.includes('NetCoreRuntime/dotnet') && contentLine.includes('exec'))) {
-            if (await this.scriptCompilationHandler.handle(contentLine, line, lineNumber, logId, timestamp, parserState, dbOps, stored)) {
-                if (stored.operation) parserState.hasActivitySinceWorker = true;
-                return stored;
-            }
-        }
-
-        return stored;
     }
 }
 
