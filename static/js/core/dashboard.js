@@ -275,20 +275,41 @@ async function toggleWatchEditorLog() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Load dummy data for testing
+ * Example log configurations
  */
-async function loadDummyData() {
+const EXAMPLE_LOGS = {
+    'fantasy-kingdom': {
+        path: 'logs/dashboard-examples/fantasy-kingdom-open-ts.txt',
+        displayName: 'Fantasy Kingdom.log'
+    },
+    'time-ghost': {
+        path: 'logs/dashboard-examples/time-ghost-open-ts.txt',
+        displayName: 'Time Ghosts.log'
+    }
+};
+
+/**
+ * Load an example log file for testing
+ * @param {string} logId - The example log identifier
+ */
+async function loadExampleLog(logId) {
+    const config = EXAMPLE_LOGS[logId];
+    if (!config) {
+        showToast(`Unknown example log: ${logId}`, 'error');
+        return;
+    }
+
     try {
         // Fetch the example log file from logs folder
         // Using .txt extension for GitHub Pages compatibility (.log files may be blocked)
-        const response = await fetch('logs/dashboard-example.txt');
+        const response = await fetch(config.path);
         if (!response.ok) {
-            throw new Error(`Failed to fetch logs/dashboard-example.txt: ${response.statusText}`);
+            throw new Error(`Failed to fetch ${config.path}: ${response.statusText}`);
         }
 
         const content = await response.text();
         const blob = new Blob([content], { type: 'text/plain' });
-        const file = new File([blob], 'dashboard-example.log', { type: 'text/plain' });
+        const file = new File([blob], config.displayName, { type: 'text/plain' });
 
         // Open the log parser modal
         if (typeof openLogParser === 'function') {
@@ -318,8 +339,8 @@ async function loadDummyData() {
         fileInput.dispatchEvent(event);
 
     } catch (error) {
-        console.error('Error loading dummy data:', error);
-        showToast(`Failed to load dummy data: ${error.message}`, 'error');
+        console.error('Error loading example log:', error);
+        showToast(`Failed to load ${config.displayName}: ${error.message}`, 'error');
     }
 }
 
@@ -420,7 +441,7 @@ window.performClear = clearDashboardAndDatabase; // Alias for live-monitor.js
 window.updateWatchButtonState = updateWatchButtonState;
 window.toggleWatchEditorLog = toggleWatchEditorLog;
 window.watchEditorLog = toggleWatchEditorLog; // Backward compatibility
-window.loadDummyData = loadDummyData;
+window.loadExampleLog = loadExampleLog;
 window.loadLogList = loadLogList;
 window.initDashboard = initDashboard;
 window.showError = showError;

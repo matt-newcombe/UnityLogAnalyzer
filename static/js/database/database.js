@@ -101,6 +101,15 @@ class UnityLogDatabase extends UnityLogDatabaseCore {
     }
 
     /**
+     * Get assets by folder path (sorted by import_time_ms descending)
+     */
+    async getAssetsByFolder(logId, folderPath) {
+        await this.open();
+        const queries = new AssetQueries(this.db);
+        return await queries.getByFolder(folderPath);
+    }
+
+    /**
      * Get worker thread timeline data
      */
     async getWorkerThreadTimeline(logId) {

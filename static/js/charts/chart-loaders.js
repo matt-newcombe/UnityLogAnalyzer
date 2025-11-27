@@ -257,7 +257,11 @@ function handleStdDevChartClick(event, elements, bins, assetType) {
         const bin = bins[binIndex];
         if (bin && bin.assets && bin.assets.length > 0) {
             if (typeof displayAssetsTable === 'function') {
-                displayAssetsTable(bin.assets, `${assetType} Assets (${formatTime(bin.start)} - ${formatTime(bin.end)})`);
+                // Sort assets by import time descending (slowest first)
+                const sortedAssets = [...bin.assets].sort((a, b) => 
+                    (b.import_time_ms || 0) - (a.import_time_ms || 0)
+                );
+                displayAssetsTable(sortedAssets, `${assetType} Assets (${formatTime(bin.start)} - ${formatTime(bin.end)})`);
             }
         }
     }

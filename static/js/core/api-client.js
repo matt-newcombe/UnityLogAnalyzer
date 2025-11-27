@@ -91,9 +91,7 @@ class APIClient {
     async getAssets() {
         try {
             const db = await this.getDatabase();
-            const assets = await db.getAssets(this.currentLogId);
-            // Reverse to get descending order (slowest first)
-            return assets.reverse();
+            return await db.getAssets(this.currentLogId);
         } catch (error) {
             console.error('Error getting assets:', error);
             throw error;
@@ -103,8 +101,7 @@ class APIClient {
     async getAssetsByType(type) {
         try {
             const db = await this.getDatabase();
-            const assets = await db.getAssetsByType(this.currentLogId, type);
-            return assets.reverse();
+            return await db.getAssetsByType(this.currentLogId, type);
         } catch (error) {
             console.error('Error getting assets by type:', error);
             throw error;
@@ -114,8 +111,7 @@ class APIClient {
     async getAssetsByCategory(category) {
         try {
             const db = await this.getDatabase();
-            const assets = await db.getAssetsByCategory(this.currentLogId, category);
-            return assets.reverse();
+            return await db.getAssetsByCategory(this.currentLogId, category);
         } catch (error) {
             console.error('Error getting assets by category:', error);
             throw error;
@@ -125,8 +121,7 @@ class APIClient {
     async getAssetsByImporter(importer) {
         try {
             const db = await this.getDatabase();
-            const assets = await db.getAssetsByImporter(this.currentLogId, importer);
-            return assets.reverse();
+            return await db.getAssetsByImporter(this.currentLogId, importer);
         } catch (error) {
             console.error('Error getting assets by importer:', error);
             throw error;
@@ -139,6 +134,16 @@ class APIClient {
             return await db.getFolderAnalysis(this.currentLogId);
         } catch (error) {
             console.error('Error getting folder analysis:', error);
+            throw error;
+        }
+    }
+
+    async getAssetsByFolder(folderPath) {
+        try {
+            const db = await this.getDatabase();
+            return await db.getAssetsByFolder(this.currentLogId, folderPath);
+        } catch (error) {
+            console.error('Error getting assets by folder:', error);
             throw error;
         }
     }
@@ -166,8 +171,7 @@ class APIClient {
     async getPipelineRefreshes() {
         try {
             const db = await this.getDatabase();
-            const refreshes = await db.getPipelineRefreshes(this.currentLogId);
-            return refreshes.reverse(); // Slowest first
+            return await db.getPipelineRefreshes(this.currentLogId);
         } catch (error) {
             console.error('Error getting pipeline refreshes:', error);
             throw error;

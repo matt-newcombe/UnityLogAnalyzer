@@ -698,6 +698,55 @@
             background: #5B8DC4;
             border-color: #5B8DC4;
         }
+
+        /* Custom tooltip styling (matches timeline/chart tooltips) */
+        .action-btn[data-tooltip] {
+            position: relative;
+        }
+
+        .action-btn[data-tooltip]::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 0.85em;
+            font-weight: 400;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.15s ease, visibility 0.15s ease;
+            z-index: 10000;
+            max-width: 300px;
+            white-space: normal;
+            text-align: center;
+        }
+
+        .action-btn[data-tooltip]::before {
+            content: '';
+            position: absolute;
+            bottom: calc(100% + 2px);
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: rgba(0, 0, 0, 0.9);
+            pointer-events: none;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.15s ease, visibility 0.15s ease;
+            z-index: 10000;
+        }
+
+        .action-btn[data-tooltip]:hover::after,
+        .action-btn[data-tooltip]:hover::before {
+            opacity: 1;
+            visibility: visible;
+        }
         
         .monitoring-status {
             display: flex;
