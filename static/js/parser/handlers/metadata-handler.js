@@ -1,138 +1,166 @@
 import { LogPatterns } from '../log-patterns.js';
 import { getFilename } from '../utils.js';
+import { calculateDurationMs } from '../time-utils.js';
 
+/**
+ * MetadataHandler - Handles log file metadata extraction
+ * 
+ * Processes:
+ * - Unity version detection
+ * - Platform and architecture identification
+ * - Project name extraction from path
+ * - Timestamp format detection (first line check)
+ * 
+ * Note: This handler stores a pending metadata update in state.pendingMetadataUpdate
+ * which should be flushed to the database after parsing completes.
+ */
 export class MetadataHandler {
-    constructor() { }
+    handle(contentLine, line, lineNumber, timestamp, state, databaseOps) {
+        const { metadataState } = state;
 
-    async handle(contentLine, line, lineNumber, logId, timestamp, state, databaseOps) {
-        // Check if we are in metadata section
-        if (!state.metadataState.inMetadata) {
-            // If we haven't started metadata yet, and this is the first line (or close to it)
-            if (lineNumber === 1) {
-                state.metadataState.inMetadata = true;
-                state.metadataState.startLine = lineNumber;
-                state.metadataState.startTime = timestamp;
-                
-                // Detect timestamps on the very first line
-                if (state.timestampsEnabled === undefined) {
-                    if (LogPatterns.TimestampPrefix.test(line)) {
-                        console.log('[MetadataHandler] Detected timestamps on first line');
-                        state.timestampsEnabled = true;
-                    } else {
-                        console.log('[MetadataHandler] No timestamp on first line, timestamps disabled');
-                        state.timestampsEnabled = false;
-                    }
-                }
-            }
-
-            if (lineNumber > 1 && !state.metadataState.inMetadata) {
-                // If we are not in metadata and not at start, we are done with metadata
-                return false;
-            }
+        // Start metadata collection on first line
+        if (lineNumber === 1) {
+            this._initializeMetadata(metadataState, lineNumber, timestamp);
+            this._detectTimestampFormat(line, state);
         }
 
-        // We are in metadata section
-        if (state.metadataState.inMetadata) {
-            // Accumulate metadata lines
-            state.metadataState.lines.push(contentLine);
-
-            // Extract metadata fields
-            if (!state.metadataState.unityVersion) {
-                const versionMatch = contentLine.match(LogPatterns.UnityVersion);
-                if (versionMatch) state.metadataState.unityVersion = versionMatch[1];
-            }
-
-            if (!state.metadataState.platform) {
-                if (LogPatterns.PlatformMacOS.test(contentLine)) state.metadataState.platform = 'macOS';
-                else if (LogPatterns.PlatformWindows.test(contentLine)) state.metadataState.platform = 'Windows';
-                else if (LogPatterns.PlatformLinux.test(contentLine)) state.metadataState.platform = 'Linux';
-            }
-
-            if (!state.metadataState.architecture) {
-                const archMatch = contentLine.match(LogPatterns.Architecture);
-                if (archMatch) state.metadataState.architecture = archMatch[1];
-            }
-
-            if (!state.metadataState.projectName) {
-                const projectPathMatch = contentLine.match(LogPatterns.ProjectPath);
-                if (projectPathMatch) {
-                    state.metadataState.projectName = getFilename(projectPathMatch[1].replace(/\/$/, ''));
-                } else {
-                    const pathMatch = contentLine.match(LogPatterns.ProjectPathChange);
-                    if (pathMatch) {
-                        state.metadataState.projectName = getFilename(pathMatch[1].replace(/\/$/, ''));
-                    }
-                }
-            }
-
-            // Check for end of metadata section
-            if (contentLine.includes('Player connection') ||
-                contentLine.includes('Start importing') ||
-                contentLine.includes('[Worker') ||
-                contentLine.includes('Asset Pipeline Refresh')) {
-
-                await this._finalizeMetadata(logId, lineNumber, timestamp, state, databaseOps);
-
-                // If we stopped because of Start importing, Worker, or Pipeline Refresh, we should return false so other handlers can process this line
-                if (contentLine.includes('Start importing') ||
-                    contentLine.includes('[Worker') ||
-                    contentLine.includes('Asset Pipeline Refresh')) {
-                    return false;
-                }
-
-                return true;
-            }
-
-            return true; // Handled as part of metadata
+        // Skip if not in metadata section
+        if (!metadataState.inMetadata) {
+            return false;
         }
 
-        return false;
+        // Collect and extract metadata
+        metadataState.lines.push(contentLine);
+        this._extractMetadataFields(contentLine, metadataState);
+
+        // Check for end of metadata section
+        if (this._isMetadataEnd(contentLine)) {
+            this._finalizeMetadata(lineNumber, timestamp, state, databaseOps);
+            
+            // Return false for lines that other handlers should process
+            return contentLine.includes('Player connection');
+        }
+
+        return true;
     }
 
-    async _finalizeMetadata(logId, lineNumber, timestamp, state, databaseOps) {
-        state.metadataState.inMetadata = false;
-        state.metadataState.endLine = lineNumber;
-        state.metadataState.endTime = timestamp;
+    // ─────────────────────────────────────────────────────────────────────────
+    // INITIALIZATION
+    // ─────────────────────────────────────────────────────────────────────────
 
-        // 1. Update Log Metadata in DB
-        const metadataUpdate = {
-            unity_version: state.metadataState.unityVersion,
-            platform: state.metadataState.platform,
-            architecture: state.metadataState.architecture,
-            project_name: state.metadataState.projectName,
+    _initializeMetadata(metadataState, lineNumber, timestamp) {
+        metadataState.inMetadata = true;
+        metadataState.startLine = lineNumber;
+        metadataState.startTime = timestamp;
+    }
+
+    _detectTimestampFormat(line, state) {
+        if (state.timestampsEnabled !== undefined) return;
+
+        state.timestampsEnabled = LogPatterns.TimestampPrefix.test(line);
+        console.log(`[MetadataHandler] ${state.timestampsEnabled ? 'Detected timestamps on first line' : 'No timestamp on first line, timestamps disabled'}`);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FIELD EXTRACTION
+    // ─────────────────────────────────────────────────────────────────────────
+
+    _extractMetadataFields(contentLine, metadataState) {
+        this._extractUnityVersion(contentLine, metadataState);
+        this._extractPlatform(contentLine, metadataState);
+        this._extractArchitecture(contentLine, metadataState);
+        this._extractProjectName(contentLine, metadataState);
+    }
+
+    _extractUnityVersion(contentLine, metadataState) {
+        if (metadataState.unityVersion) return;
+        
+        const match = contentLine.match(LogPatterns.UnityVersion);
+        if (match) metadataState.unityVersion = match[1];
+    }
+
+    _extractPlatform(contentLine, metadataState) {
+        if (metadataState.platform) return;
+
+        if (LogPatterns.PlatformMacOS.test(contentLine)) {
+            metadataState.platform = 'macOS';
+        } else if (LogPatterns.PlatformWindows.test(contentLine)) {
+            metadataState.platform = 'Windows';
+        } else if (LogPatterns.PlatformLinux.test(contentLine)) {
+            metadataState.platform = 'Linux';
+        }
+    }
+
+    _extractArchitecture(contentLine, metadataState) {
+        if (metadataState.architecture) return;
+        
+        const match = contentLine.match(LogPatterns.Architecture);
+        if (match) metadataState.architecture = match[1];
+    }
+
+    _extractProjectName(contentLine, metadataState) {
+        if (metadataState.projectName) return;
+
+        const projectPathMatch = contentLine.match(LogPatterns.ProjectPath);
+        const pathMatch = projectPathMatch || contentLine.match(LogPatterns.ProjectPathChange);
+        
+        if (pathMatch) {
+            metadataState.projectName = getFilename(pathMatch[1].replace(/\/$/, ''));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SECTION END DETECTION
+    // ─────────────────────────────────────────────────────────────────────────
+
+    _isMetadataEnd(contentLine) {
+        return contentLine.includes('Player connection') ||
+               contentLine.includes('Start importing') ||
+               contentLine.includes('[Worker') ||
+               contentLine.includes('Asset Pipeline Refresh');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINALIZATION
+    // ─────────────────────────────────────────────────────────────────────────
+
+    _finalizeMetadata(lineNumber, timestamp, state, databaseOps) {
+        const { metadataState } = state;
+        
+        metadataState.inMetadata = false;
+        metadataState.endLine = lineNumber;
+        metadataState.endTime = timestamp;
+
+        // Store pending metadata update for later flush
+        state.pendingMetadataUpdate = {
+            unity_version: metadataState.unityVersion,
+            platform: metadataState.platform,
+            architecture: metadataState.architecture,
+            project_name: metadataState.projectName,
             timestampsEnabled: state.timestampsEnabled
         };
 
-        await databaseOps.updateLogMetadata(logId, metadataUpdate);
+        this._createMetadataProcess(metadataState, state, databaseOps);
+    }
 
-        // 2. Create Operation for Metadata Block
-        // Calculate duration if timestamps are available
-        let durationSeconds = 0;
-        let durationMs = 0;
-
-        // If we have timestamps, use them
-        if (state.metadataState.startTime && state.metadataState.endTime) {
-            const start = new Date(state.metadataState.startTime).getTime();
-            const end = new Date(state.metadataState.endTime).getTime();
-            durationMs = end - start;
-            durationSeconds = durationMs / 1000;
-        }
+    _createMetadataProcess(metadataState, state, databaseOps) {
+        const { startTime, endTime, startLine } = metadataState;
+        const durationMs = calculateDurationMs(startTime, endTime);
 
         const operation = {
-            line_number: state.metadataState.startLine,
+            line_number: startLine,
             process_type: 'Metadata',
             process_name: 'Initialization',
-            duration_seconds: durationSeconds,
+            duration_seconds: durationMs / 1000,
             duration_ms: durationMs,
             memory_mb: null,
-            start_timestamp: state.metadataState.startTime,
-            end_timestamp: state.metadataState.endTime
+            start_timestamp: startTime,
+            end_timestamp: endTime
         };
 
-        // Track timestamp range for metadata (works for both timestamped and non-timestamped logs)
-        if (state.metadataState.startTime) state.trackTimestampRange(state.metadataState.startTime);
-        if (state.metadataState.endTime) state.trackTimestampRange(state.metadataState.endTime);
+        if (startTime) state.trackTimestampRange(startTime);
+        if (endTime) state.trackTimestampRange(endTime);
 
-        await databaseOps.addProcess(operation);
+        databaseOps.addProcess(operation);
     }
 }

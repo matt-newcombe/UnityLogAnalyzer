@@ -732,3 +732,322 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+        
+        /* ============================================================================
+           TEMPLATE COMPONENT STYLES
+           ============================================================================ */
+        
+        /* Chart Card Styles */
+        .chart-subtitle {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        
+        /* Empty State Styles */
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 60px 20px;
+        }
+        
+        .empty-state-icon {
+            font-size: 48px;
+            display: block;
+            margin-bottom: 16px;
+        }
+        
+        .empty-state-title {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+        
+        .empty-state-message {
+            color: #999;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .empty-state-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            height: 44px;
+            padding: 0 20px;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.2s;
+        }
+        
+        .empty-state-button:hover {
+            background: #43A047;
+        }
+        
+        /* Table Container Styles */
+        .table-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .table-hint {
+            margin-bottom: 15px;
+            color: #666;
+        }
+        
+        .table-hint strong {
+            font-weight: 600;
+        }
+        
+        .table-footer {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .table-footer h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+        
+        .table-footer p {
+            margin: 0;
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .table-back-button-container {
+            margin-bottom: 15px;
+        }
+        
+        .table-back-button {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.2s;
+        }
+        
+        .table-back-button:hover {
+            background: #5568d3;
+        }
+        
+        /* Table Scroll Container */
+        .table-scroll-container {
+            max-height: 600px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        /* Table Sticky Header */
+        .table-sticky-header {
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 10;
+        }
+        
+        /* Table Cell Styles */
+        .table-loading-cell,
+        .table-error-cell,
+        .table-empty-cell {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .table-error-cell {
+            color: #e74c3c;
+        }
+        
+        .table-empty-cell {
+            color: #666;
+        }
+        
+        /* Clickable Row */
+        .clickable-row {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .clickable-row:hover {
+            background: #f5f5f5;
+        }
+        
+        /* Line Number Cell */
+        .line-number-cell {
+            font-size: 0.85em;
+        }
+        
+        .line-number-link {
+            color: #667eea;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        
+        .line-number-link:hover {
+            text-decoration: underline;
+        }
+        
+        /* Rank Cell */
+        .rank-cell {
+            font-weight: 600;
+            color: #667eea;
+        }
+        
+        /* Timeline Container */
+        .timeline-container {
+            padding: 10px 20px;
+            min-height: 280px;
+        }
+        
+        /* Status Banners */
+        .status-banner {
+            border-radius: 6px;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9em;
+        }
+        
+        .status-banner.clickable {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .status-banner-success {
+            background: #d4edda;
+            border: 1px solid #28a745;
+        }
+        
+        .status-banner-success .status-banner-icon {
+            font-size: 16px;
+        }
+        
+        .status-banner-success .status-banner-text {
+            color: #155724;
+            font-weight: 500;
+        }
+        
+        .status-banner-warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+        }
+        
+        .status-banner-warning.clickable:hover {
+            background: #ffe69c;
+        }
+        
+        .status-banner-warning .status-banner-icon {
+            font-size: 16px;
+        }
+        
+        .status-banner-warning .status-banner-text {
+            color: #856404;
+            font-weight: 500;
+        }
+        
+        /* Dialog Overlay */
+        .dialog-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+        
+        .dialog-content {
+            background: white;
+            border-radius: 8px;
+            padding: 20px 24px;
+            max-width: 480px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        }
+        
+        .dialog-title {
+            margin: 0 0 12px 0;
+            color: #333;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .dialog-body {
+            color: #555;
+            line-height: 1.5;
+            font-size: 0.9em;
+        }
+        
+        .dialog-body p {
+            margin: 0 0 10px 0;
+        }
+        
+        .dialog-body ul,
+        .dialog-body ol {
+            margin: 0 0 10px 0;
+            padding-left: 18px;
+            font-size: 0.85em;
+        }
+        
+        .dialog-body code {
+            background: #f0f0f0;
+            padding: 1px 4px;
+            border-radius: 2px;
+            font-size: 0.9em;
+        }
+        
+        .dialog-close-button {
+            width: 100%;
+            padding: 10px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: 500;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: background 0.2s;
+        }
+        
+        .dialog-close-button:hover {
+            background: #43A047;
+        }
+        
+        /* Load Indicator */
+        .load-indicator {
+            text-align: center;
+            padding: 15px;
+            color: #667eea;
+        }
+        
+        /* Info Text */
+        .info-text {
+            text-align: center;
+            padding: 10px;
+            color: #999;
+            font-size: 0.9em;
+        }

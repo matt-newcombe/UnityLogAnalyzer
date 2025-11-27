@@ -1,19 +1,16 @@
 import { LogPatterns } from '../log-patterns.js';
-import { getExtension, calculateWallTime } from '../utils.js';
+import { calculateWallTime, createAssetImport } from '../utils.js';
 
+/**
+ * SpriteAtlasHandler - Handles sprite atlas import parsing
+ * 
+ * Processes:
+ * - Sprite atlas import start (.spriteatlasv2 files)
+ * - Atlas processing steps and operations
+ * - Import completion with timing
+ */
 export class SpriteAtlasHandler {
-    constructor(extDisplayMap = {}) {
-        this.extDisplayMap = extDisplayMap;
-    }
-
-    static shouldHandle(contentLine, state) {
-        return state.spriteAtlasState ||
-            (contentLine.includes('Start importing') && contentLine.includes('.spriteatlasv2')) ||
-            contentLine.includes('Processing Atlas') ||
-            contentLine.includes('Sprite Atlas Operation');
-    }
-
-    async handle(contentLine, line, lineNumber, logId, timestamp, state, databaseOps) {
+    handle(contentLine, line, lineNumber, timestamp, state, databaseOps) {
         if (contentLine.includes('Start importing') && contentLine.includes('.spriteatlasv2')) {
             return this._handleStartImport(contentLine, lineNumber, timestamp, state);
         }
@@ -27,11 +24,15 @@ export class SpriteAtlasHandler {
         }
 
         if (contentLine.includes('-> (artifact id:') && !contentLine.includes('[Worker') && state.spriteAtlasState) {
-            return this._handleCompletion(contentLine, lineNumber, timestamp, state, databaseOps);
+            return this._handleCompletion(contentLine, timestamp, state, databaseOps);
         }
 
         return false;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // IMPORT START HANDLING
+    // ─────────────────────────────────────────────────────────────────────────
 
     _handleStartImport(contentLine, lineNumber, timestamp, state) {
         const match = contentLine.match(LogPatterns.SpriteAtlasStart);
@@ -46,11 +47,16 @@ export class SpriteAtlasHandler {
             atlas_path: spriteAtlasPath,
             start_line: lineNumber,
             start_timestamp: timestamp,
+            byte_offset: state.currentLineByteOffset || null,
             guid,
             steps: []
         };
         return true;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PROCESSING AND OPERATIONS
+    // ─────────────────────────────────────────────────────────────────────────
 
     _handleProcessingAtlas(contentLine, state) {
         const match = contentLine.match(LogPatterns.SpriteAtlasProcessing);
@@ -72,6 +78,7 @@ export class SpriteAtlasHandler {
                     atlas_path: null,
                     start_line: lineNumber,
                     start_timestamp: timestamp,
+                    byte_offset: state.currentLineByteOffset || null,
                     steps: []
                 };
             } else {
@@ -88,13 +95,16 @@ export class SpriteAtlasHandler {
         return true;
     }
 
-    async _handleCompletion(contentLine, lineNumber, timestamp, state, databaseOps) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // IMPORT COMPLETION
+    // ─────────────────────────────────────────────────────────────────────────
+
+    _handleCompletion(contentLine, timestamp, state, databaseOps) {
         const match = contentLine.match(LogPatterns.WorkerImportComplete);
         if (!match) return false;
 
         const [, artifactId, explicitTimeSeconds] = match;
         const { spriteAtlasState } = state;
-        const atlasName = spriteAtlasState.atlas_name || 'Unknown Atlas';
 
         const { timeMs } = calculateWallTime(
             spriteAtlasState.start_timestamp,
@@ -102,26 +112,32 @@ export class SpriteAtlasHandler {
             parseFloat(explicitTimeSeconds)
         );
 
-        const spriteAtlasPath = spriteAtlasState.atlas_path || `SpriteAtlas/${atlasName}`;
-        const ext = getExtension(spriteAtlasPath);
-        const assetType = this.extDisplayMap[ext] || ext || '.spriteatlasv2';
+        const assetPath = spriteAtlasState.atlas_path || `SpriteAtlas/${spriteAtlasState.atlas_name || 'Unknown'}`;
 
-        await databaseOps.addAssetImport({
-            line_number: spriteAtlasState.start_line,
-            asset_path: spriteAtlasPath,
-            asset_name: atlasName,
-            asset_type: assetType,
-            asset_category: 'Sprite Pack',
+        const assetImport = createAssetImport({
+            lineNumber: spriteAtlasState.start_line,
+            byteOffset: spriteAtlasState.byte_offset,
+            assetPath,
             guid: spriteAtlasState.guid || null,
-            importer_type: 'SpriteAtlasImporter',
-            import_time_ms: timeMs,
-            start_timestamp: spriteAtlasState.start_timestamp || null,
-            end_timestamp: timestamp || null
+            artifactId,
+            importerType: 'SpriteAtlasImporter',
+            timeMs,
+            startTimestamp: spriteAtlasState.start_timestamp,
+            endTimestamp: timestamp
         });
+
+        // Override category for sprite atlases
+        assetImport.asset_category = 'Sprite Pack';
+
+        databaseOps.addAssetImport(assetImport);
 
         state.spriteAtlasState = null;
         return true;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OPERATION PARSING
+    // ─────────────────────────────────────────────────────────────────────────
 
     _parseOperation(line, lineNumber) {
         const lineToParse = line.replace(LogPatterns.TimestampPrefix, '');

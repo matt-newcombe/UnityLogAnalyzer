@@ -78,21 +78,7 @@ export class LiveMonitor {
         const metadata = await db.getLogMetadata(logId);
         const lastProcessedLine = metadata?.last_processed_line || 0;
 
-        // We need to know the byte offset corresponding to the last processed line
-        // Since we don't store byte offsets in DB, we might need to read from 0 if we want to be perfect,
-        // or we can just assume we start from the end if it's a new session, or rely on the server's "last_position"
-        // But the server's last_position is transient too.
-        // Strategy: 
-        // 1. If we have processed lines, we ideally want to continue from where we left off.
-        //    But mapping line number to byte offset is hard without re-reading.
-        // 2. For "Live" monitoring, it's often acceptable to start from the CURRENT end of file (tail),
-        //    OR we can ask the server for the current size and start there.
-        //    However, if we want to catch up on missed lines, we'd need to read from 0 and fast-forward.
-        //    Given the constraints and the "Live" nature, let's start from the server's current position (tail) 
-        //    unless we are explicitly told otherwise. 
-        //    Actually, the user said "resume from the end... is usually acceptable".
-        //    BUT, if we just refreshed the page, we might want to see what happened.
-        //    Let's stick to: Start from current server position (tail) to avoid re-parsing huge files.
+        // Start from current file position (tail) to avoid re-parsing large files
 
         // Get current file info from server to know where to start
         const infoUrl = this._getUrl('/info');
@@ -100,10 +86,7 @@ export class LiveMonitor {
         const infoResult = await infoResponse.json();
         let currentByteOffset = infoResult.file_info?.size || 0;
 
-        // If we have 0 processed lines, we might want to read from 0? 
-        // If it's a new log, read from 0. If it's existing, maybe tail.
-        // For simplicity and "Live" focus: Start from current size (tail).
-        // If the user wants to re-parse, they can use "Reset" or "Import".
+        // New log: start from beginning. Existing: start from tail.
         if (lastProcessedLine === 0) {
             currentByteOffset = 0;
         }
@@ -201,26 +184,6 @@ export class LiveMonitor {
             // This ensures we stay in sync even if we missed something or logic differs slightly
             const chunkStartOffset = result.start_position;
 
-            // Use UnityLogParser logic (we need an instance or just use the processor directly?)
-            // We need UnityLogParser to handle the *semantics* (handlers), 
-            // while LogStreamProcessor handles the *splitting*.
-            // We can instantiate a transient UnityLogParser or keep one. 
-            // Since UnityLogParser is stateful (handlers might be), we should probably keep one?
-            // But the plan said "ParserState instance in memory".
-            // UnityLogParser takes `db`.
-
-            if (!monitorState.parser) {
-                // Dynamically import or assume global? 
-                // The plan assumes we are in the same context.
-                // We'll assume UnityLogParser is available globally or imported.
-                // Since we are in a module, we should import it.
-                // But UnityLogParser is a default export or named? 
-                // In log-parser.js it is `export default` or `module.exports`.
-                // Let's assume we can import it.
-            }
-
-            // We need to import UnityLogParser. I'll add it to imports.
-
             let linesProcessed = 0;
 
             // Process lines
@@ -228,29 +191,32 @@ export class LiveMonitor {
                 monitorState.lastProcessedLine++;
                 linesProcessed++;
 
-                // Process with parser
-                // We use a simplified processLine call
-                // We need to ensure we have a parser instance
+                // Lazy init parser
                 if (!monitorState.unityParser) {
-                    // Lazy init
-                    const { UnityLogParser } = await import('../log-parser.js');
+                    const { UnityLogParser } = await import('../parser/log-parser.js');
                     monitorState.unityParser = new UnityLogParser(db);
                 }
 
-                await monitorState.unityParser.processLine(
+                // Process line - returns dbOps with collected data
+                const dbOps = monitorState.unityParser.processLine(
                     line,
                     monitorState.lastProcessedLine,
-                    logId,
                     parserState,
                     {
                         timestampsEnabled: monitorState.timestampsEnabled,
-                        updateMetadata: true,
                         skipLogLineStorage: true,
-                        byteOffset: lineStartByteOffset,
-                        // We use a transient dbOps for immediate writes
-                        // UnityLogParser creates one if not provided
+                        byteOffset: lineStartByteOffset
                     }
                 );
+
+                // Flush pending metadata update if any
+                if (parserState.pendingMetadataUpdate) {
+                    await dbOps.updateLogMetadata(parserState.pendingMetadataUpdate);
+                    parserState.pendingMetadataUpdate = null;
+                }
+
+                // Flush collected data to database immediately for live monitoring
+                await dbOps.flush();
 
                 // Update UI for last message
                 this.ui.updateLastMessage(logId, parserState.lastTimestamp, line);

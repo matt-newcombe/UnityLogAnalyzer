@@ -6,18 +6,6 @@
  */
 
 /**
- * Convert import_time_ms to seconds
- * @param {number} timeMs - Time in milliseconds
- * @returns {number} Time in seconds (rounded to 3 decimal places)
- */
-export function convertImportTimeToSeconds(timeMs) {
-    if (timeMs == null || isNaN(timeMs)) {
-        return 0;
-    }
-    return Math.round((timeMs / 1000) * 1000) / 1000; // Round to 3 decimal places
-}
-
-/**
  * Get file extension from path
  */
 export function getExtension(path) {
@@ -164,7 +152,6 @@ export function fillMissingTimestamps(startTimestamp, endTimestamp, explicitTime
  * Create asset import object
  */
 export function createAssetImport({
-    logId,
     lineNumber,
     byteOffset = null,
     assetPath,

@@ -1,15 +1,16 @@
 import { LogPatterns } from '../log-patterns.js';
 import { calculateWallTime, fillMissingTimestamps } from '../utils.js';
 
+/**
+ * ScriptCompilationHandler - Handles C# script compilation parsing
+ * 
+ * Processes:
+ * - Requested script compilation events
+ * - Bee compilation invocations (dotnet exec)
+ * - Compilation completion with timing
+ */
 export class ScriptCompilationHandler {
-    static shouldHandle(contentLine, state) {
-        return state.scriptCompilationState ||
-            contentLine.includes('script compilation') ||
-            contentLine.includes('[ScriptCompilation]') ||
-            (contentLine.includes('NetCoreRuntime/dotnet') && contentLine.includes('exec'));
-    }
-
-    async handle(contentLine, line, lineNumber, logId, timestamp, state, databaseOps) {
+    handle(contentLine, line, lineNumber, timestamp, state, databaseOps) {
         if (contentLine.includes('[ScriptCompilation]') && contentLine.includes('Requested script compilation')) {
             return this._handleRequestedCompilation(contentLine, lineNumber, timestamp, state);
         }
@@ -19,11 +20,15 @@ export class ScriptCompilationHandler {
         }
 
         if (contentLine.includes('script compilation time:') && state.scriptCompilationState) {
-            return await this._handleCompilationComplete(contentLine, timestamp, state, databaseOps);
+            return this._handleCompilationComplete(contentLine, timestamp, state, databaseOps);
         }
 
         return false;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // COMPILATION START HANDLING
+    // ─────────────────────────────────────────────────────────────────────────
 
     _handleRequestedCompilation(contentLine, lineNumber, timestamp, state) {
         if (state.scriptCompilationState) return false;
@@ -32,11 +37,7 @@ export class ScriptCompilationHandler {
         const becauseMatch = !assemblyMatch && contentLine.match(LogPatterns.ScriptCompilationReason);
         const assemblyName = assemblyMatch?.[1] || becauseMatch?.[1]?.trim() || 'Unknown Assembly';
 
-        state.scriptCompilationState = {
-            start_line: lineNumber,
-            start_timestamp: timestamp,
-            assembly_name: assemblyName
-        };
+        state.scriptCompilationState = this._createCompilationState(lineNumber, timestamp, assemblyName);
         return true;
     }
 
@@ -46,15 +47,23 @@ export class ScriptCompilationHandler {
         const rspMatch = contentLine.match(LogPatterns.ScriptCompilationBee);
         const assemblyName = rspMatch?.[1] || 'Unknown Assembly';
 
-        state.scriptCompilationState = {
+        state.scriptCompilationState = this._createCompilationState(lineNumber, timestamp, assemblyName);
+        return true;
+    }
+
+    _createCompilationState(lineNumber, timestamp, assemblyName) {
+        return {
             start_line: lineNumber,
             start_timestamp: timestamp,
             assembly_name: assemblyName
         };
-        return true;
     }
 
-    async _handleCompilationComplete(contentLine, timestamp, state, databaseOps) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // COMPILATION COMPLETION
+    // ─────────────────────────────────────────────────────────────────────────
+
+    _handleCompilationComplete(contentLine, timestamp, state, databaseOps) {
         const timeMatch = contentLine.match(LogPatterns.ScriptCompilationTime);
         if (!timeMatch) return false;
 
@@ -73,7 +82,7 @@ export class ScriptCompilationHandler {
             explicitTimeSeconds
         );
 
-        await databaseOps.addProcess({
+        databaseOps.addProcess({
             line_number: scriptCompilationState.start_line,
             process_type: 'Script Compilation',
             process_name: scriptCompilationState.assembly_name,
@@ -91,4 +100,3 @@ export class ScriptCompilationHandler {
         return true;
     }
 }
-

@@ -10,55 +10,104 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script
         src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
-    <script src="static/js/dexie.min.js"></script>
-    <!-- Utility Scripts -->
-    <script src="static/js/category-colors.js"></script>
-    <script src="static/js/database-timeline.js"></script>
-    <script src="static/js/database-log-lines.js"></script>
-    <script src="static/js/database.js"></script>
-    <script src="static/js/dashboard-state.js"></script>
-    <script src="static/js/dom-utils.js"></script>
-    <script src="static/js/api-client.js"></script>
-    <script src="static/js/chart-helpers.js"></script>
-    <script src="static/js/slack-integration.js"></script>
-    <script src="static/js/file-upload.js"></script>
-    <script src="static/js/asset-mappings.js"></script>
-    <script src="static/js/parsing-database-operations.js"></script>
-    <script type="module" src="static/js/timeline-normalizer.js"></script>
-    <script type="module" src="static/js/log-parser.js"></script>
-    <script src="static/js/log-parser-page.js"></script>
-    <script src="static/js/log-viewer.js"></script>
-    <script src="static/js/tables.js"></script>
-    <script src="static/js/timeline.js"></script>
-    <script src="static/js/base-chart.js"></script>
-    <script src="static/js/charts.js"></script>
-    <script src="static/js/overview.js"></script>
-    <script src="static/js/navigation.js"></script>
-    <script src="static/js/folder-analysis.js"></script>
-    <script src="static/js/pipeline.js"></script>
-    <script src="static/js/operations-table.js"></script>
-    <script src="static/js/cache-server-blocks.js"></script>
-    <script type="module" src="static/js/live-monitor.js"></script>
-    <script src="static/js/file-watcher-setup.js"></script>
+    <script src="static/js/lib/dexie.min.js"></script>
+    
+    <!-- Core Infrastructure -->
+    <script src="static/js/core/app-context.js"></script>
+    
+    <!-- Core Database (non-module, loads first) -->
+    <!-- Database Core: schema, versioning, connection management -->
+    <script src="static/js/database/database-core.js"></script>
+    <!-- Query Classes: specialized database queries -->
+    <script src="static/js/database/queries/summary-query.js"></script>
+    <script src="static/js/database/queries/asset-queries.js"></script>
+    <script src="static/js/database/queries/folder-analysis.js"></script>
+    <script src="static/js/database/queries/process-queries.js"></script>
+    <!-- Timeline Builders -->
+    <script src="static/js/database/timeline/timeline-positioner.js"></script>
+    <script src="static/js/database/timeline/import-chunk-builder.js"></script>
+    <script src="static/js/database/timeline/operation-builder.js"></script>
+    <script src="static/js/database/timeline/cache-block-builder.js"></script>
+    <script src="static/js/database/timeline/worker-timeline-builder.js"></script>
+    <script src="static/js/database/database-timeline.js"></script>
+    <!-- Log Lines Query -->
+    <script src="static/js/database/database-log-lines.js"></script>
+    <!-- Main Database Facade (extends Core, uses Query classes) -->
+    <script src="static/js/database/database.js"></script>
+    <script src="static/js/core/api-client.js"></script>
+    
+    <!-- Refactored Modules (ES modules, load async but export to window) -->
+    <script type="module" src="static/js/core/formatters.js"></script>
+    <script type="module" src="static/js/core/state.js"></script>
+    <script type="module" src="static/js/core/dom-utils.js"></script>
+    <script type="module" src="static/js/charts/colors.js"></script>
+    <script type="module" src="static/js/charts/tooltips.js"></script>
+    <script type="module" src="static/js/charts/formatters.js"></script>
+    <script type="module" src="static/js/charts/config-builders.js"></script>
+    <script type="module" src="static/js/charts/data-processors.js"></script>
+    <script type="module" src="static/js/charts/base-chart.js"></script>
+    <script type="module" src="static/js/charts/chart-loaders.js"></script>
+    <script type="module" src="static/js/components/tables/context-menu.js"></script>
+    <script type="module" src="static/js/components/tables/assets-table.js"></script>
+    <script type="module" src="static/js/components/tables/folder-table.js"></script>
+    <script type="module" src="static/js/components/tables/mode-time-table.js"></script>
+    <script type="module" src="static/js/components/tables/pipeline-table.js"></script>
+    <script type="module" src="static/js/components/tables/operations-table.js"></script>
+    <script type="module" src="static/js/components/tables/slowest-assets-table.js"></script>
+    <script type="module" src="static/js/components/timeline/tooltip.js"></script>
+    <script type="module" src="static/js/components/timeline/renderer.js"></script>
+    <script type="module" src="static/js/components/timeline/index.js"></script>
+    <script type="module" src="static/js/views/overview.js"></script>
+    <script type="module" src="static/js/views/navigation.js"></script>
+    
+    <!-- Central Module Registry - registers all ES module exports to window -->
+    <script type="module" src="static/js/core/module-registry.js"></script>
+    
+    <!-- Legacy Scripts (still needed for parsing, log viewer, and live monitoring) -->
+    <script src="static/js/components/log-viewer/log-viewer.js"></script>
+    <script src="static/js/features/slack-integration.js"></script>
+    <script src="static/js/core/dashboard.js"></script>
+    <script src="static/js/data/asset-mappings.js"></script>
+    <script src="static/js/parser/parsing-database-operations.js"></script>
+    <script type="module" src="static/js/parser/timeline-normalizer.js"></script>
+    <script type="module" src="static/js/parser/log-parser.js"></script>
+    <script src="static/js/components/log-parser/log-parser-page.js"></script>
+    <script type="module" src="static/js/components/tables/cache-server-blocks.js"></script>
+    <script type="module" src="static/js/live-monitor/index.js"></script>
+    <script src="static/js/live-monitor/file-watcher-setup.js"></script>
+    
+    <!-- Module initialization - runs after all modules are loaded -->
+    <script type="module">
+        // This module script runs after all other modules have loaded
+        window.modulesLoaded = true;
+        if (typeof window.initDashboard === 'function') {
+            window.initDashboard();
+        }
+    </script>
     <link rel="stylesheet" href="static/css/dashboard.css">
     <script>
-        // Load and display version number
-        fetch('version.txt')
-            .then(response => response.text())
-            .then(text => {
-                const version = text.trim();
-                const versionElements = document.querySelectorAll('#version-display');
-                versionElements.forEach(el => {
-                    if (el) el.textContent = `Version: ${version}`;
+        // Register Chart.js datalabels plugin and load version
+        document.addEventListener('DOMContentLoaded', () => {
+            Chart.register(ChartDataLabels);
+            
+            // Load version number
+            fetch('version.txt')
+                .then(response => response.text())
+                .then(text => {
+                    const version = text.trim();
+                    const versionElements = document.querySelectorAll('#version-display');
+                    versionElements.forEach(el => {
+                        if (el) el.textContent = `Version: ${version}`;
+                    });
+                })
+                .catch(error => {
+                    console.warn('Failed to load version:', error);
+                    const versionElements = document.querySelectorAll('#version-display');
+                    versionElements.forEach(el => {
+                        if (el) el.textContent = 'Version: Unknown';
+                    });
                 });
-            })
-            .catch(error => {
-                console.warn('Failed to load version:', error);
-                const versionElements = document.querySelectorAll('#version-display');
-                versionElements.forEach(el => {
-                    if (el) el.textContent = 'Version: Unknown';
-                });
-            });
+        });
     </script>
 </head>
 
@@ -135,541 +184,6 @@
         </div>
     </div>
 
-    <script>
-        // Lines processed counter update function
-        // Register datalabels plugin globally
-        Chart.register(ChartDataLabels);
-
-        // State variables are now managed in dashboard-state.js
-
-        // Helper function to format seconds into readable format
-        function formatTime(seconds) {
-            if (seconds >= 3600) {
-                // Hours:Minutes format (omit seconds for readability)
-                const hours = Math.floor(seconds / 3600);
-                const mins = Math.floor((seconds % 3600) / 60);
-                return `${hours}h ${mins}m`;
-            } else if (seconds >= 60) {
-                // Minutes:Seconds format
-                const minutes = Math.floor(seconds / 60);
-                const secs = Math.floor(seconds % 60);
-                return `${minutes}m ${secs}s`;
-            }
-            return seconds.toFixed(2) + 's';
-        }
-
-        // Toast notification system (replaces alert/confirm)
-        function showToast(message, type = 'info', duration = 4000) {
-            const toast = document.createElement('div');
-            toast.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: ${type === 'error' ? '#f44336' : type === 'success' ? '#4CAF50' : type === 'warning' ? '#ff9800' : '#2196F3'};
-                color: white;
-                padding: 15px 20px;
-                border-radius: 8px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-                z-index: 10000;
-                font-weight: 600;
-                max-width: 400px;
-                word-wrap: break-word;
-                animation: slideIn 0.3s ease;
-            `;
-            toast.textContent = message;
-
-            // Add animation
-            const style = document.createElement('style');
-            if (!document.getElementById('toast-animations')) {
-                style.id = 'toast-animations';
-                style.textContent = `
-                    @keyframes slideIn {
-                        from { transform: translateX(100%); opacity: 0; }
-                        to { transform: translateX(0); opacity: 1; }
-                    }
-                    @keyframes slideOut {
-                        from { transform: translateX(0); opacity: 1; }
-                        to { transform: translateX(100%); opacity: 0; }
-                    }
-                `;
-                document.head.appendChild(style);
-            }
-
-            document.body.appendChild(toast);
-
-            setTimeout(() => {
-                toast.style.animation = 'slideOut 0.3s ease';
-                setTimeout(() => toast.remove(), 300);
-            }, duration);
-        }
-        window.showToast = showToast;
-
-        // Clear dashboard and database
-        async function clearDashboardAndDatabase() {
-
-            try {
-                // Stop any active monitoring
-                if (window.liveMonitor) {
-                    const activeMonitors = window.liveMonitor.getActiveMonitors();
-                    for (const logId of activeMonitors) {
-                        await window.liveMonitor.stopMonitoring(logId);
-                    }
-                }
-
-                // Close current database
-                const currentDb = await getCurrentDatabase();
-                if (currentDb && currentDb.db) {
-                    await currentDb.close();
-                }
-
-                // Create new database
-                const newDb = await createNewDatabase();
-                await newDb.open();
-
-                // Update API client
-                if (window.apiClient) {
-                    if (window.apiClient.db) {
-                        await window.apiClient.db.close().catch(() => { });
-                    }
-                    window.apiClient.db = newDb;
-                }
-
-                // Clear dashboard
-                if (window.clearDashboard) {
-                    window.clearDashboard();
-                }
-
-                // Refresh
-                if (typeof loadLogList === 'function') {
-                    loadLogList();
-                }
-
-                showToast('Database cleared successfully', 'success');
-            } catch (error) {
-                console.error('Error clearing database:', error);
-                showToast('Error clearing database: ' + error.message, 'error');
-            }
-        }
-        window.clearDashboardAndDatabase = clearDashboardAndDatabase;
-        window.performClear = clearDashboardAndDatabase; // Alias for live-monitor.js
-
-        // Update watch button state
-        function updateWatchButtonState() {
-            const watchBtn = document.getElementById('watch-editor-log-btn');
-            const monitoringStatus = document.getElementById('monitoring-status');
-            const monitoringPathText = document.getElementById('monitoring-path-text');
-
-            if (!watchBtn) return;
-
-            if (window.liveMonitor) {
-                const activeMonitors = window.liveMonitor.getActiveMonitors();
-                if (activeMonitors.length > 0) {
-                    // Active monitoring - change button to "Stop Watching"
-                    watchBtn.classList.remove('action-btn-secondary');
-                    watchBtn.classList.add('action-btn-danger');
-                    watchBtn.innerHTML = '⏹️ Stop Watching';
-                    watchBtn.onclick = toggleWatchEditorLog;
-
-                    // Show monitoring status with file path
-                    if (monitoringStatus) {
-                        const firstLogId = activeMonitors[0];
-                        const monitor = window.liveMonitor.activeMonitors.get(firstLogId);
-                        if (monitor && monitor.filePath) {
-                            monitoringPathText.textContent = monitor.filePath;
-                            monitoringStatus.style.display = 'flex';
-                        } else {
-                            monitoringStatus.style.display = 'none';
-                        }
-                    }
-                } else {
-                    // No active monitoring - change button to "Watch Editor Log"
-                    watchBtn.classList.remove('action-btn-danger');
-                    watchBtn.classList.add('action-btn-secondary');
-                    watchBtn.innerHTML = '👁️ Watch Editor Log';
-                    watchBtn.onclick = toggleWatchEditorLog;
-
-                    // Hide monitoring status
-                    if (monitoringStatus) {
-                        monitoringStatus.style.display = 'none';
-                    }
-                }
-            }
-        }
-        window.updateWatchButtonState = updateWatchButtonState;
-
-        // Toggle Watch Editor Log function
-        async function toggleWatchEditorLog() {
-            if (!window.liveMonitor) {
-                showToast('Live monitor not available', 'error');
-                return;
-            }
-
-            const activeMonitors = window.liveMonitor.getActiveMonitors();
-
-            // If already watching, stop it
-            if (activeMonitors.length > 0) {
-                for (const logId of activeMonitors) {
-                    await window.liveMonitor.stopMonitoring(logId);
-                }
-                updateWatchButtonState();
-                showToast('Monitoring stopped.', 'success');
-                return;
-            }
-
-            // Otherwise, start watching
-            const isAvailable = await window.liveMonitor.isFileWatcherAvailable();
-
-            if (isAvailable) {
-                try {
-                    const db = await getCurrentDatabase();
-                    await db.open();
-
-                    const watchUrl = window.liveMonitor._getFileWatcherUrl('/watch');
-                    if (!watchUrl) {
-                        throw new Error('File watcher service not available');
-                    }
-
-                    const watchResponse = await fetch(watchUrl);
-                    const watchData = await watchResponse.json();
-
-                    if (watchData.error) {
-                        throw new Error(watchData.error);
-                    }
-
-                    const detectedFilePath = watchData.file_path;
-                    console.log(`[Watch] File watcher started watching: ${detectedFilePath}`);
-
-                    // Create a minimal log entry that will be populated by polling
-                    const fileName = detectedFilePath.split('/').pop() || detectedFilePath.split('\\').pop() || 'Editor.log';
-                    const metadata = {
-                        log_file: fileName,
-                        date_parsed: new Date().toISOString(),
-                        total_lines: null,
-                        total_parse_time_ms: null,
-                        timestampsEnabled: null // Will be set by MetadataHandler during parsing
-                    };
-
-                    const logId = await db.insertLogMetadata(metadata);
-                    console.log(`[Watch] Created log entry (log_id: ${logId}), starting polling from beginning`);
-
-                    // Start live monitoring - it will poll from position 0 and process all existing content
-                    await window.liveMonitor.startWatchingWithFileWatcher(logId, detectedFilePath, db);
-                    updateWatchButtonState();
-                    loadLogList();
-                } catch (error) {
-                    console.error('[Watch] Error:', error);
-                    showToast(`Failed to start watching: ${error.message}`, 'error');
-                }
-            } else {
-                if (window.fileWatcherSetup) {
-                    window.fileWatcherSetup.showSetupInstructions();
-                } else {
-                    showToast('File watcher service not available. Please run editor_log_watcher.py', 'error');
-                }
-            }
-        }
-        window.toggleWatchEditorLog = toggleWatchEditorLog;
-        window.watchEditorLog = toggleWatchEditorLog; // Backward compatibility
-
-        // Load dummy data for testing
-        async function loadDummyData() {
-            try {
-                // Fetch the dummy log file from root
-                const response = await fetch('dummy.log');
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch dummy.log: ${response.statusText}`);
-                }
-
-                const content = await response.text();
-                const blob = new Blob([content], { type: 'text/plain' });
-                const file = new File([blob], 'dummy.log', { type: 'text/plain' });
-
-                // Open the log parser modal
-                if (typeof openLogParser === 'function') {
-                    openLogParser();
-                } else if (window.openLogParser) {
-                    window.openLogParser();
-                } else {
-                    throw new Error('Log parser not available');
-                }
-
-                // Wait for modal to open and initialize
-                await new Promise(resolve => setTimeout(resolve, 100));
-
-                // Programmatically trigger file selection
-                const fileInput = document.getElementById('parser-file-input');
-                if (!fileInput) {
-                    throw new Error('File input not found');
-                }
-
-                // Create a DataTransfer to set the file
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(file);
-                fileInput.files = dataTransfer.files;
-
-                // Trigger the change event
-                const event = new Event('change', { bubbles: true });
-                fileInput.dispatchEvent(event);
-
-            } catch (error) {
-                console.error('Error loading dummy data:', error);
-                showToast(`Failed to load dummy data: ${error.message}`, 'error');
-            }
-        }
-        window.loadDummyData = loadDummyData;
-
-        // Initialize
-        loadLogList();
-
-
-        function navigateToLogLine(lineNumber) {
-            if (lineNumber && lineNumber > 0) {
-                openLogViewer(lineNumber);
-            } else {
-                // Fallback if no line number available
-                console.warn('No line number available for this timeline segment');
-            }
-        }// Context menu for right-click copy
-        function showContextMenu(event, path) {
-            event.preventDefault();
-            event.stopPropagation();
-
-            console.log('showContextMenu called with path:', path);
-
-            // Remove existing menu
-            if (contextMenu) {
-                contextMenu.remove();
-                contextMenu = null;
-            }
-
-            // Create menu
-            contextMenu = document.createElement('div');
-            contextMenu.className = 'context-menu';
-
-            // Set position and visibility explicitly
-            // Use clientX/clientY instead of pageX/pageY to account for scroll
-            const x = event.clientX;
-            const y = event.clientY;
-
-            contextMenu.style.position = 'fixed';
-            contextMenu.style.left = x + 'px';
-            contextMenu.style.top = y + 'px';
-            contextMenu.style.display = 'block';
-            contextMenu.style.visibility = 'visible';
-            contextMenu.style.opacity = '1';
-            contextMenu.style.zIndex = '1000000';
-            contextMenu.style.backgroundColor = 'white';
-            contextMenu.style.border = '1px solid #ddd';
-            contextMenu.style.borderRadius = '4px';
-            contextMenu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
-            contextMenu.style.padding = '4px 0';
-            contextMenu.style.minWidth = '150px';
-            contextMenu.style.pointerEvents = 'auto';
-            contextMenu.style.margin = '0';
-            contextMenu.style.transform = 'none';
-
-            // Create menu item with event listener instead of inline onclick
-            const menuItem = document.createElement('div');
-            menuItem.className = 'context-menu-item';
-            menuItem.textContent = 'Copy Path';
-            menuItem.style.padding = '8px 16px';
-            menuItem.style.cursor = 'pointer';
-            menuItem.style.fontSize = '13px';
-            menuItem.style.color = '#333';
-            menuItem.addEventListener('click', (e) => {
-                e.stopPropagation();
-                copyToClipboard(path);
-                hideContextMenu();
-            });
-            menuItem.addEventListener('mouseenter', () => {
-                menuItem.style.backgroundColor = '#f0f0f0';
-            });
-            menuItem.addEventListener('mouseleave', () => {
-                menuItem.style.backgroundColor = 'transparent';
-            });
-
-            contextMenu.appendChild(menuItem);
-
-            // Append to body, ensuring it's not clipped by any container
-            document.body.appendChild(contextMenu);
-
-            // Force a reflow to ensure styles are applied
-            contextMenu.offsetHeight;
-
-            // Use requestAnimationFrame to ensure DOM is ready
-            requestAnimationFrame(() => {
-                if (!contextMenu || !contextMenu.parentNode) {
-                    console.error('Context menu was removed before it could be displayed!');
-                    return;
-                }
-
-                // Force visibility - use !important via setProperty
-                contextMenu.style.setProperty('display', 'block', 'important');
-                contextMenu.style.setProperty('visibility', 'visible', 'important');
-                contextMenu.style.setProperty('opacity', '1', 'important');
-                contextMenu.style.setProperty('z-index', '1000000', 'important');
-
-                const rect = contextMenu.getBoundingClientRect();
-                const computedStyle = window.getComputedStyle(contextMenu);
-                console.log('Menu rect after append:', rect);
-                console.log('Menu computed display:', computedStyle.display);
-                console.log('Menu computed visibility:', computedStyle.visibility);
-                console.log('Menu computed opacity:', computedStyle.opacity);
-                console.log('Menu computed z-index:', computedStyle.zIndex);
-                console.log('Menu parent:', contextMenu.parentNode);
-
-                // If menu is outside viewport, adjust position
-                if (rect.right > window.innerWidth) {
-                    contextMenu.style.left = (window.innerWidth - rect.width - 10) + 'px';
-                }
-                if (rect.bottom > window.innerHeight) {
-                    contextMenu.style.top = (event.clientY - rect.height - 10) + 'px';
-                }
-                if (rect.left < 0) {
-                    contextMenu.style.left = '10px';
-                }
-                if (rect.top < 0) {
-                    contextMenu.style.top = '10px';
-                }
-
-                // Ensure menu is visible in viewport
-                const viewportTop = window.scrollY;
-                const viewportBottom = window.scrollY + window.innerHeight;
-                if (rect.top < viewportTop || rect.bottom > viewportBottom) {
-                    // Position relative to click point, but ensure it's visible
-                    const newTop = Math.min(event.clientY, window.innerHeight - rect.height - 10);
-                    contextMenu.style.top = Math.max(10, newTop) + 'px';
-                }
-
-                // Final check - is it actually visible?
-                const finalRect = contextMenu.getBoundingClientRect();
-                if (finalRect.width === 0 || finalRect.height === 0) {
-                    console.error('Menu has zero dimensions!', finalRect);
-                }
-            });
-
-            // Close on click outside - but wait a bit to ensure menu is visible
-            setTimeout(() => {
-                const clickHandler = (e) => {
-                    // Only hide if click is outside the menu
-                    if (contextMenu && !contextMenu.contains(e.target)) {
-                        hideContextMenu();
-                        document.removeEventListener('click', clickHandler);
-                    }
-                };
-                document.addEventListener('click', clickHandler);
-            }, 200);
-        } function renderAssetRows() {
-            const tbody = document.getElementById('asset-table-body');
-            const assetsToShow = allAssetsData.slice(0, displayedAssetCount);
-
-            tbody.innerHTML = assetsToShow.map(asset => {
-                const category = asset.asset_category || 'Unknown';
-                const importer = asset.importer_type || 'Unknown';
-                const timeSeconds = asset.import_time_ms / 1000;
-                const timeFormatted = formatTime(timeSeconds);
-
-                // Determine badge color based on time
-                let timeBadgeClass = 'badge';
-                if (timeSeconds > 1) {
-                    timeBadgeClass = 'badge-warning';
-                } else if (timeSeconds < 0.1) {
-                    timeBadgeClass = 'badge-success';
-                }
-
-                const assetPath = asset.asset_path || '';
-                const escapedPath = assetPath.replace(/"/g, '&quot;');
-
-                return `
-                <tr data-line="${asset.line_number}" 
-                    data-path="${escapedPath}"
-                    onclick="openLogViewer(${asset.line_number})">
-                    <td style="font-size: 0.85em;">
-                        <a href="javascript:void(0)" 
-                           style="color: #667eea; font-weight: 600; text-decoration: none;"
-                           onclick="event.stopPropagation(); openLogViewer(${asset.line_number});"
-                           title="Jump to line ${asset.line_number} in log">
-                            ${asset.line_number}
-                        </a>
-                    </td>
-                    <td>
-                        <strong style="color: #1a1a1a; font-size: 0.9em; word-break: break-word;">${asset.asset_name}</strong>
-                    </td>
-                    <td>
-                        <span class="badge">${category}</span>
-                    </td>
-                    <td>
-                        <span class="mono">${asset.asset_type || 'N/A'}</span>
-                    </td>
-                    <td>
-                        <span class="mono" style="font-size: 0.85em;">${importer}</span>
-                    </td>
-                    <td style="text-align: right;">
-                        <span class="${timeBadgeClass}" style="font-weight: 600;">${timeFormatted}</span>
-                    </td>
-                    <td>
-                        <span class="text-truncate-long" 
-                              style="font-size: 0.9em; color: #666;">
-                            ${asset.asset_path}
-                        </span>
-                    </td>
-                </tr>
-            `;
-            }).join('');
-
-            // Update info
-            const infoDiv = document.getElementById('asset-info');
-            if (infoDiv) {
-                if (displayedAssetCount >= allAssetsData.length) {
-                    infoDiv.textContent = `Showing all ${allAssetsData.length} assets`;
-                } else {
-                    infoDiv.textContent = `Showing ${displayedAssetCount} of ${allAssetsData.length} assets (scroll to load more)`;
-                }
-            }
-        }
-
-        function setupAssetTableScroll() {
-            const scrollContainer = document.getElementById('asset-table-scroll');
-            if (!scrollContainer) return;
-
-            let isLoadingAssets = false;
-
-            scrollContainer.addEventListener('scroll', () => {
-                const scrollTop = scrollContainer.scrollTop;
-                const scrollHeight = scrollContainer.scrollHeight;
-                const clientHeight = scrollContainer.clientHeight;
-
-                // Load more when within 100px of bottom
-                if (scrollTop + clientHeight > scrollHeight - 100 && !isLoadingAssets && displayedAssetCount < allAssetsData.length) {
-                    isLoadingAssets = true;
-                    document.getElementById('asset-load-indicator').style.display = 'block';
-
-                    setTimeout(() => {
-                        displayedAssetCount = Math.min(displayedAssetCount + assetPageSize, allAssetsData.length);
-                        renderAssetRows();
-                        setupAssetTableContextMenus();
-                        isLoadingAssets = false;
-                        document.getElementById('asset-load-indicator').style.display = 'none';
-                    }, 100);
-                }
-            });
-        }
-
-        function showError(message) {
-            const errorDiv = document.getElementById('error');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-        }
-
-        function hideError() {
-            const errorDiv = document.getElementById('error');
-            errorDiv.style.display = 'none';
-        }
-
-        // Slack integration and log viewer functions are now in their respective modules
-    </script>
-
-    <!-- Log Viewer Overlay -->
     <!-- Log Parser Overlay -->
     <div id="log-parser-overlay" class="log-viewer-overlay" style="display: none;">
         <div id="log-parser-panel"
@@ -734,6 +248,7 @@
         </div>
     </div>
 
+    <!-- Log Viewer Overlay -->
     <div id="log-viewer-overlay" class="log-viewer-overlay" onclick="if(event.target === this) closeLogViewer();">
         <div id="log-viewer-panel" class="log-viewer-panel">
             <div class="log-viewer-header">

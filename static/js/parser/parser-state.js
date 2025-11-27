@@ -31,8 +31,9 @@ export class ParserState {
         // Pending worker threads (waiting for end timestamp)
         this.pendingWorkerThreads = {};
 
-        // Pending imports (main thread): map of guid -> { assetPath, startTime, ... }
-        this.pendingImports = {};
+        // Pending import (main thread): single pending multi-line import
+        // Main thread imports are always sequential - only one can be pending at a time
+        this.pendingImport = null;
 
 
 
@@ -51,7 +52,9 @@ export class ParserState {
 
         // Accelerator block state
         this.acceleratorBlock = null;
-        this.acceleratorAssetMap = {};
+
+        // Pending metadata update (set by MetadataHandler, flushed after parsing)
+        this.pendingMetadataUpdate = null;
 
         // Timestamp tracking
         this.firstTimestamp = null;

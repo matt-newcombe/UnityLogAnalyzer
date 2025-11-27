@@ -1,57 +1,52 @@
 import { LogPatterns } from '../log-patterns.js';
 import { extractImporterType, shouldSkipAsset, calculateWallTime, createAssetImport } from '../utils.js';
+import { advanceLogTime } from '../time-utils.js';
 
+/**
+ * AssetHandler - Handles main thread asset import parsing
+ * 
+ * Processes:
+ * - Single-line imports: "Start importing X ... -> (artifact id: Y) in Z seconds"
+ * - Multi-line imports: "Start importing X" followed later by "-> (artifact id: Y)"
+ * - Keyframe reduction detection for animation assets
+ * 
+ * Note: Main thread imports are always sequential - only one pending import exists at a time.
+ */
 export class AssetHandler {
-    static shouldHandle(contentLine) {
-        return contentLine.includes('Start importing') || 
-               contentLine.includes('-> (artifact id:') || 
-               contentLine.includes('Keyframe reduction:');
-    }
-
-    async handle(contentLine, line, lineNumber, logId, timestamp, state, databaseOps) {
+    handle(contentLine, line, lineNumber, timestamp, state, databaseOps) {
+        // Handle "Start importing" lines (but not worker thread lines)
         if (contentLine.includes('Start importing') && !contentLine.includes('[Worker')) {
-            return await this._handleImportStart(contentLine, lineNumber, logId, timestamp, state, databaseOps);
+            return this._handleImportStart(contentLine, lineNumber, timestamp, state, databaseOps);
         }
 
+        // Handle keyframe reduction markers (indicates animation import)
         if (contentLine.includes('Keyframe reduction:')) {
             return this._handleKeyframeReduction(state);
         }
 
-        if (line.includes('-> (artifact id:') && !line.includes('[Worker')) {
-            return await this._handleImportComplete(line, lineNumber, logId, timestamp, state, databaseOps);
+        // Handle import completion lines (but not worker thread lines)
+        if (contentLine.includes('-> (artifact id:') && !contentLine.includes('[Worker')) {
+            return this._handleImportComplete(contentLine, lineNumber, timestamp, state, databaseOps);
         }
 
         return false;
     }
 
-    async _handleImportStart(contentLine, lineNumber, logId, timestamp, state, databaseOps) {
-        const importData = this._parseAssetImport(contentLine, lineNumber, timestamp, state);
+    // ─────────────────────────────────────────────────────────────────────────
+    // IMPORT START HANDLING
+    // ─────────────────────────────────────────────────────────────────────────
+
+    _handleImportStart(contentLine, lineNumber, timestamp, state, databaseOps) {
+        // Try to parse as single-line import (contains full import info)
+        const importData = this._parseSingleLineImport(contentLine, lineNumber, timestamp, state);
 
         if (importData) {
-            if (this._isCacheServerRequest(importData.asset_path, state)) {
-                if (state.acceleratorBlock) {
-                    this._trackNotDownloaded(importData.asset_path, state.acceleratorBlock);
-                }
-                importData.importer_type = 'Cache Download';
-            }
-            await databaseOps.addAssetImport(importData);
+            databaseOps.addAssetImport(importData);
             return true;
         }
 
+        // Otherwise, handle as multi-line import start
         return this._handleMultiLineImportStart(contentLine, lineNumber, timestamp, state);
-    }
-
-    _isCacheServerRequest(assetPath, state) {
-        return (state.acceleratorBlock?.requested_asset_map?.[assetPath]) ||
-               state.acceleratorAssetMap[assetPath];
-    }
-
-    _trackNotDownloaded(assetPath, acceleratorBlock) {
-        const { downloaded_assets, not_downloaded_assets } = acceleratorBlock;
-        
-        if (!downloaded_assets.includes(assetPath) && !not_downloaded_assets.includes(assetPath)) {
-            not_downloaded_assets.push(assetPath);
-        }
     }
 
     _handleMultiLineImportStart(contentLine, lineNumber, timestamp, state) {
@@ -59,19 +54,12 @@ export class AssetHandler {
         if (!startMatch) return true;
 
         const [, assetPath, guid] = startMatch;
-        const isCacheServerRequest = this._isCacheServerRequest(assetPath, state);
-
-        if (isCacheServerRequest && state.acceleratorBlock) {
-            this._trackNotDownloaded(assetPath, state.acceleratorBlock);
-        }
-
-        const pendingImport = this._createPendingImport(contentLine, assetPath, guid, lineNumber, timestamp, state, isCacheServerRequest);
-        state.pendingImports[guid] = pendingImport;
+        state.pendingImport = this._createPendingImport(contentLine, assetPath, guid, lineNumber, timestamp, state);
 
         return true;
     }
 
-    _createPendingImport(contentLine, assetPath, guid, lineNumber, timestamp, state, isCacheServerRequest) {
+    _createPendingImport(contentLine, assetPath, guid, lineNumber, timestamp, state) {
         const crunchMatch = contentLine.match(LogPatterns.AssetImportCrunched);
         const importerMatch = contentLine.match(LogPatterns.ImporterType);
         
@@ -83,73 +71,61 @@ export class AssetHandler {
             guid,
             line_number: lineNumber,
             byte_offset: state.currentLineByteOffset || null,
-            importer_type: isCacheServerRequest ? 'Cache Download' : importerType,
+            importer_type: importerType,
             start_timestamp: timestamp || state.logCurrentTime,
             crunch_time: !isNaN(crunchTime) ? crunchTime : undefined,
-            is_animation: contentLine.includes('Keyframe reduction:'),
-            is_cache_server_request: isCacheServerRequest
+            is_animation: false
         };
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // KEYFRAME REDUCTION (ANIMATION DETECTION)
+    // ─────────────────────────────────────────────────────────────────────────
+
     _handleKeyframeReduction(state) {
-        const pendingImports = state.pendingImports;
-        const animationsFolderImports = Object.keys(pendingImports).filter(guid => {
-            const pending = pendingImports[guid];
-            const path = (pending?.asset_path || '').toLowerCase();
-            return path.includes('/animations/') && path.endsWith('.fbx');
-        });
-
-        const targetsToMark = animationsFolderImports.length > 0 
-            ? animationsFolderImports
-            : Object.keys(pendingImports).filter(guid => {
-                const pending = pendingImports[guid];
-                return (pending?.asset_path || '').toLowerCase().endsWith('.fbx');
-            });
-
-        targetsToMark.forEach(guid => {
-            if (pendingImports[guid]) {
-                pendingImports[guid].is_animation = true;
+        // Mark the current pending import as an animation if it's an FBX file
+        if (state.pendingImport) {
+            const path = (state.pendingImport.asset_path || '').toLowerCase();
+            if (path.endsWith('.fbx')) {
+                state.pendingImport.is_animation = true;
             }
-        });
-
+        }
         return true;
     }
 
-    async _handleImportComplete(line, lineNumber, logId, timestamp, state, databaseOps) {
-        const { artifactId, explicitTimeSeconds } = this._parseCompletionLine(line, lineNumber);
-        if (!artifactId || Object.keys(state.pendingImports).length === 0) return false;
+    // ─────────────────────────────────────────────────────────────────────────
+    // IMPORT COMPLETION HANDLING
+    // ─────────────────────────────────────────────────────────────────────────
 
-        const { bestMatch, bestGuid } = this._findBestPendingImport(state.pendingImports, timestamp, explicitTimeSeconds);
-        if (!bestMatch || !bestGuid) return false;
+    _handleImportComplete(contentLine, lineNumber, timestamp, state, databaseOps) {
+        const { artifactId, explicitTimeSeconds } = this._parseCompletionLine(contentLine, lineNumber);
+        if (!artifactId || !state.pendingImport) return false;
 
-        const { timeSeconds, timeMs } = this._calculateImportTime(bestMatch, timestamp, explicitTimeSeconds);
+        const pending = state.pendingImport;
+        const { timeSeconds, timeMs } = this._calculateImportTime(pending, timestamp, explicitTimeSeconds);
 
+        // Advance log time for non-timestamped logs
         if (!timestamp) {
-            this._advanceLogCurrentTime(state, timeSeconds);
+            advanceLogTime(state, timeSeconds);
         }
 
         const assetImport = createAssetImport({
-            logId,
-            lineNumber: bestMatch.line_number,
-            byteOffset: bestMatch.byte_offset || null,
-            assetPath: bestMatch.asset_path,
-            guid: bestMatch.guid,
+            lineNumber: pending.line_number,
+            byteOffset: pending.byte_offset,
+            assetPath: pending.asset_path,
+            guid: pending.guid,
             artifactId,
-            importerType: bestMatch.importer_type,
+            importerType: pending.importer_type,
             timeSeconds,
             timeMs,
-            startTimestamp: bestMatch.start_timestamp,
+            startTimestamp: pending.start_timestamp,
             endTimestamp: timestamp,
-            isAnimation: bestMatch.is_animation
+            isAnimation: pending.is_animation
         });
 
-        await databaseOps.addAssetImport(assetImport);
+        databaseOps.addAssetImport(assetImport);
 
-        if (bestMatch.is_cache_server_request && state.acceleratorBlock && timestamp) {
-            state.acceleratorBlock.last_timestamp = timestamp;
-        }
-
-        delete state.pendingImports[bestGuid];
+        state.pendingImport = null;
         return true;
     }
 
@@ -168,69 +144,35 @@ export class AssetHandler {
         return { artifactId, explicitTimeSeconds };
     }
 
-    _findBestPendingImport(pendingImports, timestamp, explicitTimeSeconds) {
-        const currentTimestamp = timestamp ? new Date(timestamp).getTime() : null;
-        let bestMatch = null;
-        let bestGuid = null;
-        let bestTimeDiff = Infinity;
-
-        if (currentTimestamp) {
-            for (const [guid, pendingState] of Object.entries(pendingImports)) {
-                if (!pendingState.start_timestamp) continue;
-
-                const startTime = new Date(pendingState.start_timestamp).getTime();
-                const timeDiff = Math.abs(currentTimestamp - (startTime + explicitTimeSeconds * 1000));
-
-                if (timeDiff < Math.min(bestTimeDiff, 5000)) {
-                    bestTimeDiff = timeDiff;
-                    bestMatch = pendingState;
-                    bestGuid = guid;
-                }
-            }
+    _calculateImportTime(pending, timestamp, explicitTimeSeconds) {
+        // Prefer wall-clock time if both timestamps available
+        if (pending.start_timestamp && timestamp) {
+            return calculateWallTime(pending.start_timestamp, timestamp, explicitTimeSeconds);
         }
 
-        if (!bestMatch) {
-            const guids = Object.keys(pendingImports);
-            bestGuid = guids[guids.length - 1];
-            bestMatch = pendingImports[bestGuid];
+        // Use crunch time if available (from texture compression)
+        if (pending.crunch_time !== undefined && !isNaN(pending.crunch_time)) {
+            return { timeSeconds: pending.crunch_time, timeMs: pending.crunch_time * 1000 };
         }
 
-        return { bestMatch, bestGuid };
-    }
-
-    _calculateImportTime(bestMatch, timestamp, explicitTimeSeconds) {
-        if (bestMatch.start_timestamp && timestamp) {
-            return calculateWallTime(bestMatch.start_timestamp, timestamp, explicitTimeSeconds);
-        }
-
-        if (bestMatch.crunch_time !== undefined && !isNaN(bestMatch.crunch_time)) {
-            return { timeSeconds: bestMatch.crunch_time, timeMs: bestMatch.crunch_time * 1000 };
-        }
-
+        // Fall back to explicit time from log
         return { timeSeconds: explicitTimeSeconds, timeMs: explicitTimeSeconds * 1000 };
     }
 
-    _advanceLogCurrentTime(state, timeSeconds) {
-        if (!state.logCurrentTime || !timeSeconds || isNaN(timeSeconds)) return;
+    // ─────────────────────────────────────────────────────────────────────────
+    // SINGLE-LINE IMPORT PARSING
+    // ─────────────────────────────────────────────────────────────────────────
 
-        const currentMs = new Date(state.logCurrentTime).getTime();
-        if (isNaN(currentMs)) return;
-
-        const newMs = currentMs + (timeSeconds * 1000);
-        if (!isNaN(newMs)) {
-            state.logCurrentTime = new Date(newMs).toISOString();
-        }
-    }
-
-    _parseAssetImport(line, lineNumber, timestamp, state = null) {
+    _parseSingleLineImport(line, lineNumber, timestamp, state) {
         let match = line.match(LogPatterns.AssetImportComplete);
 
         if (!match) {
-            match = line.match(LogPatterns.AssetImportCrunched);
-            if (match) return null;
+            // Check for crunched texture format (multi-line, return null to handle separately)
+            if (line.match(LogPatterns.AssetImportCrunched)) return null;
         }
 
         if (!match) {
+            // Try format without artifact ID
             match = line.match(LogPatterns.AssetImportCompleteNoArtifact);
             if (match) {
                 match = [match[0], match[1], match[2], match[3], null, match[4]];
@@ -249,7 +191,6 @@ export class AssetHandler {
         const { startTimestamp, endTimestamp } = this._calculateSingleLineTimestamps(timestamp, timeSeconds, state);
 
         return createAssetImport({
-            logId: null,
             lineNumber,
             byteOffset: state?.currentLineByteOffset || null,
             assetPath,
@@ -268,14 +209,12 @@ export class AssetHandler {
             return { startTimestamp: timestamp, endTimestamp: timestamp };
         }
 
-        if (!state) {
+        if (!state?.logCurrentTime) {
             return { startTimestamp: null, endTimestamp: null };
         }
 
         const startTimestamp = state.logCurrentTime;
-        const currentMs = new Date(state.logCurrentTime).getTime();
-        const newMs = currentMs + (timeSeconds * 1000);
-        state.logCurrentTime = new Date(newMs).toISOString();
+        advanceLogTime(state, timeSeconds);
 
         return { startTimestamp, endTimestamp: state.logCurrentTime };
     }

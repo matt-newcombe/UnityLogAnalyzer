@@ -39,10 +39,6 @@ export const LogPatterns = {
 
     // Pipeline Refresh
     PipelineRefreshStart: /Asset Pipeline Refresh \(id=([a-f0-9]+)\): Total: ([\d.]+) seconds - Initiated by (.+?)$/,
-    PipelineImports: /total=(\d+).*actual=(\d+)/,
-    PipelineAssetDbProcess: /managed=(\d+)\s*ms.*native=(\d+)\s*ms/,
-    PipelineAssetDbCallback: /managed=(\d+)\s*ms.*native=(\d+)\s*ms/,
-    PipelineDomainReload: /domain reloads=(\d+).*domain reload time=([\d]+)\s*ms.*compile time=([\d]+)\s*ms.*other=([\d]+)\s*ms/,
 
 
 
@@ -64,4 +60,5 @@ export const LogPatterns = {
     // Accelerator (Unity Cache Server)
     AcceleratorQuery: /Querying for cacheable assets in Cache Server:/,
     AcceleratorArtifact: /Artifact/, // Simple check
+    AcceleratorDownloaded: /Artifact ([a-f0-9]+) downloaded for '(.+)'/,
 };
