@@ -19,24 +19,28 @@ class AssetQueries {
 
     /**
      * Get assets by category using compound index
+     * Returns assets sorted by import_time_ms descending (slowest first)
      * @param {string} category - Asset category to filter by
      */
     async getByCategory(category) {
         return await this.db.asset_imports
             .where('[asset_category+import_time_ms]')
             .between([category, Dexie.minKey], [category, Dexie.maxKey])
+            .reverse()
             .toArray();
     }
 
     /**
      * Get assets by type using compound index
+     * Returns assets sorted by import_time_ms descending (slowest first)
      * @param {string} assetType - Asset type to filter by
      * @param {number|null} limit - Optional limit for pagination
      */
     async getByType(assetType, limit = null) {
         let query = this.db.asset_imports
             .where('[asset_type+import_time_ms]')
-            .between([assetType, Dexie.minKey], [assetType, Dexie.maxKey]);
+            .between([assetType, Dexie.minKey], [assetType, Dexie.maxKey])
+            .reverse();
 
         if (limit !== null && limit > 0) {
             return await query.limit(limit).toArray();
@@ -48,6 +52,7 @@ class AssetQueries {
     /**
      * Get assets by type with progressive loading
      * Yields batches via callback for responsive UI
+     * Returns assets sorted by import_time_ms descending (slowest first)
      * @param {string} assetType - Asset type to filter by
      * @param {Function} batchCallback - Called with each batch
      * @param {number} batchSize - Size of each batch
@@ -64,9 +69,11 @@ class AssetQueries {
         const allAssets = [];
 
         while (offset < totalCount) {
+            // Use reverse() to get slowest assets first (descending by import_time_ms)
             const batch = await this.db.asset_imports
                 .where('[asset_type+import_time_ms]')
                 .between([assetType, Dexie.minKey], [assetType, Dexie.maxKey])
+                .reverse()
                 .offset(offset)
                 .limit(batchSize)
                 .toArray();
@@ -104,12 +111,14 @@ class AssetQueries {
 
     /**
      * Get assets by importer type using compound index
+     * Returns assets sorted by import_time_ms descending (slowest first)
      * @param {string} importerType - Importer type to filter by
      */
     async getByImporter(importerType) {
         return await this.db.asset_imports
             .where('[importer_type+import_time_ms]')
             .between([importerType, Dexie.minKey], [importerType, Dexie.maxKey])
+            .reverse()
             .toArray();
     }
 

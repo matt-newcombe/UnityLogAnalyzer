@@ -81,6 +81,11 @@ export function categorizeAsset(path, importerType = null) {
     const assetType = extMap[ext] || (ext || 'no-extension');
     let category = catMap[ext] || 'Other';
 
+    // Partial match: extensions containing 'hlsltemplate' are Shaders
+    if (category === 'Other' && ext.includes('hlsltemplate')) {
+        category = 'Shaders';
+    }
+
     // Override category if importer is TextureImporter
     if (importerType && importerType !== '-1' && importerType === 'TextureImporter') {
         category = 'Textures';

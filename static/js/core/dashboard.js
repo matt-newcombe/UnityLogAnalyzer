@@ -280,9 +280,10 @@ async function toggleWatchEditorLog() {
 async function loadDummyData() {
     try {
         // Fetch the example log file from logs folder
-        const response = await fetch('logs/dashboard-example.log');
+        // Using .txt extension for GitHub Pages compatibility (.log files may be blocked)
+        const response = await fetch('logs/dashboard-example.txt');
         if (!response.ok) {
-            throw new Error(`Failed to fetch logs/dashboard-example.log: ${response.statusText}`);
+            throw new Error(`Failed to fetch logs/dashboard-example.txt: ${response.statusText}`);
         }
 
         const content = await response.text();

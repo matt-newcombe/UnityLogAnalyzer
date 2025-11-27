@@ -19,9 +19,13 @@
 const ASSET_EXT_DISPLAY_MAP = {
     '.shader': '.shader',
     '.shadergraph': '.shadergraph',
+    '.shadersubgraph': '.shadersubgraph',
     '.compute': '.compute',
     '.cginc': '.cginc',
     '.hlsl': '.hlsl',
+    '.uss': '.uss',
+    '.uxml': '.uxml',
+    '.tt': '.tt',
     '.png': '.png',
     '.jpg': '.jpg',
     '.jpeg': '.jpeg',
@@ -59,11 +63,15 @@ const ASSET_EXT_DISPLAY_MAP = {
  * Maps file extensions to their asset categories for grouping in the dashboard
  */
 const ASSET_CATEGORY_MAP = {
-    '.shader': 'Rendering',
+    '.shader': 'Shaders',
     '.shadergraph': 'Shaders',
-    '.compute': 'Rendering',
-    '.cginc': 'Rendering',
-    '.hlsl': 'Rendering',
+    '.shadersubgraph': 'Shaders',
+    '.compute': 'Shaders',
+    '.cginc': 'Shaders',
+    '.hlsl': 'Shaders',
+    '.uss': 'UI',
+    '.uxml': 'UI',
+    '.tt': 'UI',
     '.png': 'Textures',
     '.jpg': 'Textures',
     '.jpeg': 'Textures',
